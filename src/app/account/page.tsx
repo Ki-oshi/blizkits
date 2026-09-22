@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useState,
@@ -8,14 +9,25 @@ import {
 } from "react";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import {
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
+
+import type {
+  User as SupabaseUser,
+} from "@supabase/supabase-js";
 
 import Container from "@/components/ui/Container";
 import Button from "@/components/ui/Button";
 
-import { createClient } from "@/lib/supabase/client";
-import { updateProfile } from "@/app/actions/profile";
+import {
+  createClient,
+} from "@/lib/supabase/client";
+
+import {
+  updateProfile,
+} from "@/app/actions/profile";
 
 import PurchasesManager from "@/components/account/PurchasesManager";
 import AddressManager from "@/components/account/AddressManager";
@@ -36,12 +48,15 @@ import {
 } from "lucide-react";
 
 /* =========================================================
-   ACCOUNT PAGE
+   ACCOUNT PAGE CONTENT
 ========================================================= */
 
-export default function AccountPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+function AccountPageContent() {
+  const router =
+    useRouter();
+
+  const searchParams =
+    useSearchParams();
 
   const initialTab =
     searchParams.get("tab") ||
@@ -58,7 +73,10 @@ export default function AccountPage() {
   const [
     activeTab,
     setActiveTab,
-  ] = useState(initialTab);
+  ] =
+    useState(
+      initialTab
+    );
 
   const [
     user,
@@ -71,32 +89,50 @@ export default function AccountPage() {
   const [
     profile,
     setProfile,
-  ] = useState<any>(null);
+  ] =
+    useState<any>(
+      null
+    );
 
   const [
     orders,
     setOrders,
-  ] = useState<any[]>([]);
+  ] =
+    useState<any[]>(
+      []
+    );
 
   const [
     addresses,
     setAddresses,
-  ] = useState<any[]>([]);
+  ] =
+    useState<any[]>(
+      []
+    );
 
   const [
     paymentMethods,
     setPaymentMethods,
-  ] = useState<any[]>([]);
+  ] =
+    useState<any[]>(
+      []
+    );
 
   const [
     notifications,
     setNotifications,
-  ] = useState<any>(null);
+  ] =
+    useState<any>(
+      null
+    );
 
   const [
     loading,
     setLoading,
-  ] = useState(true);
+  ] =
+    useState(
+      true
+    );
 
   const [
     message,
@@ -106,12 +142,15 @@ export default function AccountPage() {
       type:
         | "success"
         | "error";
-      text: string;
+
+      text:
+        string;
     } | null>(
       urlMessage
         ? {
             type:
               "success",
+
             text:
               urlMessage,
           }
@@ -121,15 +160,19 @@ export default function AccountPage() {
   const [
     isPending,
     startTransition,
-  ] = useTransition();
+  ] =
+    useTransition();
 
   /*
-   * Keep one Supabase browser client
-   * for the lifetime of this component.
+   * Keep one stable Supabase
+   * browser client.
    */
-  const [supabase] =
-    useState(() =>
-      createClient()
+  const [
+    supabase,
+  ] =
+    useState(
+      () =>
+        createClient()
     );
 
   /* =======================================================
@@ -137,18 +180,34 @@ export default function AccountPage() {
   ======================================================= */
 
   const clearAccountData =
-    useCallback(() => {
-      setUser(null);
-      setProfile(null);
+    useCallback(
+      () => {
+        setUser(
+          null
+        );
 
-      setOrders([]);
-      setAddresses([]);
-      setPaymentMethods([]);
+        setProfile(
+          null
+        );
 
-      setNotifications(
-        null
-      );
-    }, []);
+        setOrders(
+          []
+        );
+
+        setAddresses(
+          []
+        );
+
+        setPaymentMethods(
+          []
+        );
+
+        setNotifications(
+          null
+        );
+      },
+      []
+    );
 
   /* =======================================================
      LOAD ACCOUNT DATA
@@ -162,24 +221,29 @@ export default function AccountPage() {
           | null
       ) => {
         /*
-         * authUser may legitimately
-         * be null.
-         *
-         * Never read .id before
-         * checking it.
+         * Never access .id
+         * before checking user.
          */
-        if (!authUser) {
+        if (
+          !authUser
+        ) {
           clearAccountData();
-          setLoading(false);
+
+          setLoading(
+            false
+          );
 
           return;
         }
 
         try {
-          setLoading(true);
+          setLoading(
+            true
+          );
 
           /*
-           * Update UI user state.
+           * Store authenticated
+           * user for UI.
            */
           setUser(
             authUser
@@ -188,12 +252,12 @@ export default function AccountPage() {
           /*
            * IMPORTANT:
            *
-           * Use authUser.id instead
-           * of user.id from React
-           * state.
+           * Use this authenticated
+           * object directly.
            *
-           * setUser() does not update
-           * synchronously.
+           * Do not use React's
+           * `user` state here because
+           * setUser() is asynchronous.
            */
           const userId =
             authUser.id;
@@ -206,28 +270,27 @@ export default function AccountPage() {
             notifRes,
           ] =
             await Promise.all([
-              /*
-               * PROFILE
-               */
+              /* =========================
+                 PROFILE
+              ========================= */
+
               supabase
                 .from(
                   "profiles"
                 )
-                .select("*")
+                .select(
+                  "*"
+                )
                 .eq(
                   "id",
                   userId
                 )
                 .maybeSingle(),
 
-              /*
-               * ORDERS
-               *
-               * Also retrieve
-               * order items and
-               * payment records
-               * for My Purchases.
-               */
+              /* =========================
+                 ORDERS
+              ========================= */
+
               supabase
                 .from(
                   "orders"
@@ -267,14 +330,17 @@ export default function AccountPage() {
                   }
                 ),
 
-              /*
-               * ADDRESSES
-               */
+              /* =========================
+                 ADDRESSES
+              ========================= */
+
               supabase
                 .from(
                   "addresses"
                 )
-                .select("*")
+                .select(
+                  "*"
+                )
                 .eq(
                   "user_id",
                   userId
@@ -294,15 +360,17 @@ export default function AccountPage() {
                   }
                 ),
 
-              /*
-               * PAYMENT
-               * PREFERENCES
-               */
+              /* =========================
+                 PAYMENT PREFERENCES
+              ========================= */
+
               supabase
                 .from(
                   "payment_methods"
                 )
-                .select("*")
+                .select(
+                  "*"
+                )
                 .eq(
                   "user_id",
                   userId
@@ -322,14 +390,17 @@ export default function AccountPage() {
                   }
                 ),
 
-              /*
-               * NOTIFICATIONS
-               */
+              /* =========================
+                 NOTIFICATIONS
+              ========================= */
+
               supabase
                 .from(
                   "user_notifications"
                 )
-                .select("*")
+                .select(
+                  "*"
+                )
                 .eq(
                   "user_id",
                   userId
@@ -337,11 +408,10 @@ export default function AccountPage() {
                 .maybeSingle(),
             ]);
 
-          /*
-           * Log individual query
-           * errors without crashing
-           * the whole dashboard.
-           */
+          /* =============================
+             QUERY ERRORS
+          ============================= */
+
           if (
             profileRes.error
           ) {
@@ -387,9 +457,10 @@ export default function AccountPage() {
             );
           }
 
-          /*
-           * Update dashboard state.
-           */
+          /* =============================
+             UPDATE STATE
+          ============================= */
+
           setProfile(
             profileRes.data ??
               null
@@ -445,149 +516,45 @@ export default function AccountPage() {
      AUTHENTICATION
   ======================================================= */
 
-  useEffect(() => {
-    let mounted =
-      true;
+  useEffect(
+    () => {
+      let mounted =
+        true;
 
-    async function initializeAuth() {
-      try {
-        /*
-         * Read current session.
-         */
-        const {
-          data: {
-            session,
-          },
-          error:
-            sessionError,
-        } =
-          await supabase.auth.getSession();
+      async function initializeAuth() {
+        try {
+          /*
+           * Read existing browser
+           * session first.
+           */
+          const {
+            data: {
+              session,
+            },
+            error:
+              sessionError,
+          } =
+            await supabase.auth.getSession();
 
-        if (!mounted) {
-          return;
-        }
-
-        if (
-          sessionError
-        ) {
-          console.error(
-            "Session error:",
-            sessionError
-          );
-        }
-
-        /*
-         * No browser session.
-         */
-        if (
-          !session?.user
-        ) {
-          clearAccountData();
-
-          setLoading(
-            false
-          );
-
-          return;
-        }
-
-        /*
-         * Verify the session with
-         * Supabase Auth.
-         */
-        const {
-          data: {
-            user:
-              verifiedUser,
-          },
-          error:
-            userError,
-        } =
-          await supabase.auth.getUser();
-
-        if (!mounted) {
-          return;
-        }
-
-        if (
-          userError ||
-          !verifiedUser
-        ) {
-          if (
-            userError
-          ) {
-            console.error(
-              "User verification error:",
-              userError
-            );
-          }
-
-          clearAccountData();
-
-          setLoading(
-            false
-          );
-
-          return;
-        }
-
-        /*
-         * Pass the verified user
-         * directly.
-         */
-        await loadUserData(
-          verifiedUser
-        );
-      } catch (
-        error
-      ) {
-        console.error(
-          "Authentication initialization error:",
-          error
-        );
-
-        if (
-          mounted
-        ) {
-          clearAccountData();
-
-          setLoading(
-            false
-          );
-        }
-      }
-    }
-
-    void initializeAuth();
-
-    /*
-     * Keep account dashboard in
-     * sync with login/logout/token
-     * changes.
-     */
-    const {
-      data: {
-        subscription,
-      },
-    } =
-      supabase.auth.onAuthStateChange(
-        (
-          event,
-          session
-        ) => {
           if (
             !mounted
           ) {
             return;
           }
 
+          if (
+            sessionError
+          ) {
+            console.error(
+              "Session error:",
+              sessionError
+            );
+          }
+
           /*
-           * Logout / expired
-           * authentication.
+           * No session.
            */
           if (
-            event ===
-              "SIGNED_OUT" ||
             !session?.user
           ) {
             clearAccountData();
@@ -596,96 +563,206 @@ export default function AccountPage() {
               false
             );
 
-            router.refresh();
+            return;
+          }
+
+          /*
+           * Verify session against
+           * Supabase Auth.
+           */
+          const {
+            data: {
+              user:
+                verifiedUser,
+            },
+            error:
+              userError,
+          } =
+            await supabase.auth.getUser();
+
+          if (
+            !mounted
+          ) {
+            return;
+          }
+
+          if (
+            userError ||
+            !verifiedUser
+          ) {
+            if (
+              userError
+            ) {
+              console.error(
+                "User verification error:",
+                userError
+              );
+            }
+
+            clearAccountData();
+
+            setLoading(
+              false
+            );
 
             return;
           }
 
           /*
-           * User authentication
-           * changed.
+           * Load account information
+           * using verified auth user.
            */
+          await loadUserData(
+            verifiedUser
+          );
+        } catch (
+          error
+        ) {
+          console.error(
+            "Authentication initialization error:",
+            error
+          );
+
           if (
-            event ===
-              "SIGNED_IN" ||
-            event ===
-              "USER_UPDATED" ||
-            event ===
-              "TOKEN_REFRESHED"
+            mounted
           ) {
-            const currentUser =
-              session.user;
+            clearAccountData();
 
-            /*
-             * Update UI immediately.
-             */
-            setUser(
-              currentUser
-            );
-
-            /*
-             * Avoid performing
-             * additional Supabase
-             * calls synchronously
-             * inside the auth
-             * callback.
-             */
-            setTimeout(
-              () => {
-                if (
-                  !mounted
-                ) {
-                  return;
-                }
-
-                void loadUserData(
-                  currentUser
-                );
-
-                /*
-                 * Refresh Server
-                 * Components such as
-                 * Navbar.
-                 */
-                router.refresh();
-              },
-              0
+            setLoading(
+              false
             );
           }
         }
-      );
+      }
 
-    return () => {
-      mounted =
-        false;
+      void initializeAuth();
 
-      subscription.unsubscribe();
-    };
-  }, [
-    supabase,
-    router,
-    loadUserData,
-    clearAccountData,
-  ]);
+      /*
+       * Listen for login/logout/
+       * refresh events.
+       */
+      const {
+        data: {
+          subscription,
+        },
+      } =
+        supabase.auth.onAuthStateChange(
+          (
+            event,
+            session
+          ) => {
+            if (
+              !mounted
+            ) {
+              return;
+            }
+
+            /*
+             * Signed out / expired
+             * session.
+             */
+            if (
+              event ===
+                "SIGNED_OUT" ||
+              !session?.user
+            ) {
+              clearAccountData();
+
+              setLoading(
+                false
+              );
+
+              router.refresh();
+
+              return;
+            }
+
+            /*
+             * Authenticated session
+             * changed.
+             */
+            if (
+              event ===
+                "SIGNED_IN" ||
+              event ===
+                "USER_UPDATED" ||
+              event ===
+                "TOKEN_REFRESHED"
+            ) {
+              const currentUser =
+                session.user;
+
+              /*
+               * Immediately update
+               * user state.
+               */
+              setUser(
+                currentUser
+              );
+
+              /*
+               * Avoid heavy async
+               * work directly inside
+               * Supabase auth callback.
+               */
+              setTimeout(
+                () => {
+                  if (
+                    !mounted
+                  ) {
+                    return;
+                  }
+
+                  void loadUserData(
+                    currentUser
+                  );
+
+                  router.refresh();
+                },
+                0
+              );
+            }
+          }
+        );
+
+      return () => {
+        mounted =
+          false;
+
+        subscription.unsubscribe();
+      };
+    },
+    [
+      supabase,
+      router,
+      loadUserData,
+      clearAccountData,
+    ]
+  );
 
   /* =======================================================
      URL TAB SYNC
   ======================================================= */
 
-  useEffect(() => {
-    const tab =
-      searchParams.get(
-        "tab"
-      );
+  useEffect(
+    () => {
+      const tab =
+        searchParams.get(
+          "tab"
+        );
 
-    if (tab) {
-      setActiveTab(
+      if (
         tab
-      );
-    }
-  }, [
-    searchParams,
-  ]);
+      ) {
+        setActiveTab(
+          tab
+        );
+      }
+    },
+    [
+      searchParams,
+    ]
+  );
 
   /* =======================================================
      PROFILE UPDATE
@@ -738,11 +815,12 @@ export default function AccountPage() {
             });
 
             /*
-             * Reload account information
-             * using the current authenticated
-             * user object.
+             * Reload account after
+             * profile update.
              */
-            if (user) {
+            if (
+              user
+            ) {
               await loadUserData(
                 user
               );
@@ -773,7 +851,9 @@ export default function AccountPage() {
      LOADING
   ======================================================= */
 
-  if (loading) {
+  if (
+    loading
+  ) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center bg-white">
         <div className="flex flex-col items-center gap-3">
@@ -792,7 +872,9 @@ export default function AccountPage() {
      NOT AUTHENTICATED
   ======================================================= */
 
-  if (!user) {
+  if (
+    !user
+  ) {
     return (
       <div className="flex min-h-[75vh] items-center justify-center bg-white py-20 md:py-28">
         <Container className="max-w-md space-y-6 text-center">
@@ -832,18 +914,16 @@ export default function AccountPage() {
 
           <div className="space-y-2">
             <h1 className="text-2xl font-black tracking-tight text-neutral-900 sm:text-3xl">
-              Account Access
-              Required
+              Account Access Required
             </h1>
 
             <p className="text-sm leading-6 text-neutral-500">
-              Please sign in or
-              create an account
-              first to view your
-              dashboard, check
-              your order history,
-              and manage your
-              saved addresses.
+              Please sign in or create
+              an account first to view
+              your dashboard, check
+              your order history, and
+              manage your saved
+              addresses.
             </p>
           </div>
 
@@ -965,32 +1045,43 @@ export default function AccountPage() {
                 {
                   id:
                     "profile",
+
                   label:
                     "My Profile",
-                  icon: User,
+
+                  icon:
+                    User,
                 },
 
                 {
                   id:
                     "purchases",
+
                   label:
                     "My Purchases",
-                  icon: Package,
+
+                  icon:
+                    Package,
                 },
 
                 {
                   id:
                     "addresses",
+
                   label:
                     "Shipping Addresses",
-                  icon: MapPin,
+
+                  icon:
+                    MapPin,
                 },
 
                 {
                   id:
                     "payments",
+
                   label:
                     "Payment Preferences",
+
                   icon:
                     CreditCard,
                 },
@@ -998,16 +1089,21 @@ export default function AccountPage() {
                 {
                   id:
                     "notifications",
+
                   label:
                     "Notifications",
-                  icon: Bell,
+
+                  icon:
+                    Bell,
                 },
 
                 {
                   id:
                     "settings",
+
                   label:
                     "Settings",
+
                   icon:
                     SettingsIcon,
                 },
@@ -1069,14 +1165,12 @@ export default function AccountPage() {
               <div className="space-y-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
                 <div>
                   <h2 className="text-xl font-bold text-neutral-900">
-                    Profile
-                    Information
+                    Profile Information
                   </h2>
 
                   <p className="mt-1 text-xs text-neutral-500">
-                    Update your
-                    personal account
-                    details and
+                    Update your personal
+                    account details and
                     display name.
                   </p>
                 </div>
@@ -1106,8 +1200,7 @@ export default function AccountPage() {
 
                     <span className="mt-1 block text-[11px] text-neutral-400">
                       Email address
-                      cannot be
-                      changed.
+                      cannot be changed.
                     </span>
                   </div>
 
@@ -1242,5 +1335,37 @@ export default function AccountPage() {
         </div>
       </Container>
     </div>
+  );
+}
+
+/* =========================================================
+   PAGE + SUSPENSE BOUNDARY
+========================================================= */
+
+/*
+ * useSearchParams() is used inside
+ * AccountPageContent.
+ *
+ * Next.js 16 requires that component
+ * to be rendered below a Suspense
+ * boundary during production build.
+ */
+export default function AccountPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[70vh] items-center justify-center bg-white">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-200 border-t-pink-500" />
+
+            <p className="animate-pulse text-sm text-neutral-500">
+              Loading account dashboard...
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <AccountPageContent />
+    </Suspense>
   );
 }
