@@ -1,8 +1,12 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import {
+  Suspense,
+  useState,
+} from "react";
+
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import {
   AlertCircle,
@@ -13,56 +17,68 @@ import {
 
 import Container from "@/components/ui/Container";
 
-export default function CheckoutFailedPage() {
-  const searchParams = useSearchParams();
+function CheckoutFailedContent() {
+  const searchParams =
+    useSearchParams();
 
   const reference =
-    searchParams.get("reference") ?? "N/A";
+    searchParams.get("reference") ??
+    "N/A";
 
-  const [copied, setCopied] =
-    useState(false);
+  const [
+    copied,
+    setCopied,
+  ] = useState(false);
 
-  const copyReference = async () => {
-    if (
-      !reference ||
-      reference === "N/A"
-    ) {
-      return;
-    }
+  const copyReference =
+    async () => {
+      if (
+        !reference ||
+        reference === "N/A"
+      ) {
+        return;
+      }
 
-    await navigator.clipboard.writeText(
-      reference
-    );
+      await navigator.clipboard.writeText(
+        reference
+      );
 
-    setCopied(true);
+      setCopied(true);
 
-    setTimeout(() => {
-      setCopied(false);
-    }, 2000);
-  };
+      setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    };
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center bg-white px-4 py-16">
       <Container className="max-w-xl">
         <div className="text-center">
           {/* Error Icon */}
+
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-red-200 bg-red-50 text-red-600">
             <AlertCircle className="h-10 w-10" />
           </div>
 
           {/* Heading */}
+
           <h1 className="mt-7 text-3xl font-black tracking-tight text-neutral-900 sm:text-4xl">
             Payment Not Completed
           </h1>
 
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-neutral-500">
-            Your payment was not completed.
-            No order should be considered paid
-            until payment confirmation is received.
+            Your payment was not
+            completed. No order
+            should be considered
+            paid until payment
+            confirmation is
+            received.
           </p>
 
           {/* Reference */}
-          {reference !== "N/A" && (
+
+          {reference !==
+            "N/A" && (
             <div className="mt-8 rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-left">
               <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
                 Checkout Reference
@@ -75,7 +91,9 @@ export default function CheckoutFailedPage() {
 
                 <button
                   type="button"
-                  onClick={copyReference}
+                  onClick={
+                    copyReference
+                  }
                   className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-pink-300 hover:text-pink-500"
                 >
                   <Copy className="h-3.5 w-3.5" />
@@ -89,19 +107,24 @@ export default function CheckoutFailedPage() {
           )}
 
           {/* Warning */}
+
           <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4">
             <p className="text-sm font-bold text-red-800">
-              Your cart has not been cleared
+              Your cart has not been
+              cleared
             </p>
 
             <p className="mt-1 text-xs leading-5 text-red-700">
-              You can return to checkout and try
-              again using the same or a different
-              payment method.
+              You can return to
+              checkout and try again
+              using the same or a
+              different payment
+              method.
             </p>
           </div>
 
           {/* Actions */}
+
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
             <Link
               href="/checkout"
@@ -123,12 +146,35 @@ export default function CheckoutFailedPage() {
           </div>
 
           <p className="mx-auto mt-7 max-w-md text-[11px] leading-5 text-neutral-400">
-            If money was deducted but this page
-            appeared, check your payment activity
-            before attempting another payment.
+            If money was deducted
+            but this page appeared,
+            check your payment
+            activity before
+            attempting another
+            payment.
           </p>
         </div>
       </Container>
     </div>
+  );
+}
+
+export default function CheckoutFailedPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[80vh] items-center justify-center bg-white">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-200 border-t-pink-500" />
+
+            <p className="animate-pulse text-sm text-neutral-500">
+              Loading payment details...
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <CheckoutFailedContent />
+    </Suspense>
   );
 }
