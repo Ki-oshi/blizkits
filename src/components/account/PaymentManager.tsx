@@ -1182,4 +1182,4 @@ export default function PaymentManager({
       )}
     </div>
   );
-}
+} 
