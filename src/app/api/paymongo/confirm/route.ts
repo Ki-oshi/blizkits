@@ -15,25 +15,19 @@ import {
   finalizePaidOrder,
 } from "@/lib/orders/finalizePaidOrder";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   request: NextRequest
 ) {
-  /*
-   * Track which stage fails.
-   *
-   * This is safe to return because
-   * it contains no credentials.
-   */
-  let stage =
-    "initialization";
+  let stage = "initialization";
 
   try {
     /* =====================================================
        ORDER REFERENCE
     ===================================================== */
 
-    stage =
-      "reading_reference";
+    stage = "reading_reference";
 
     const reference =
       request.nextUrl.searchParams.get(
@@ -43,8 +37,7 @@ export async function GET(
     if (!reference) {
       return NextResponse.json(
         {
-          error:
-            "Missing order reference.",
+          error: "Missing order reference.",
         },
         {
           status: 400,
@@ -56,20 +49,14 @@ export async function GET(
        AUTHENTICATION
     ===================================================== */
 
-    stage =
-      "authenticating_user";
+    stage = "authenticating_user";
 
-    const supabase =
-      await createClient();
+    const supabase = await createClient();
 
     const {
-      data: {
-        user,
-      },
-      error:
-        authError,
-    } =
-      await supabase.auth.getUser();
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
     if (authError) {
       console.error(
@@ -81,8 +68,7 @@ export async function GET(
     if (!user) {
       return NextResponse.json(
         {
-          error:
-            "Not authenticated.",
+          error: "Not authenticated.",
         },
         {
           status: 401,
@@ -94,47 +80,35 @@ export async function GET(
        ADMIN CLIENT
     ===================================================== */
 
-    stage =
-      "creating_admin_client";
+    stage = "creating_admin_client";
 
-    const admin =
-      createAdminClient();
+    const admin = createAdminClient();
 
     /* =====================================================
        FIND ORDER
     ===================================================== */
 
-    stage =
-      "finding_order";
+    stage = "finding_order";
 
     const {
       data: order,
-      error:
-        orderError,
-    } =
-      await admin
-        .from(
-          "orders"
-        )
-        .select(
-          `
-            id,
-            order_number,
-            user_id,
-            payment_status,
-            order_status,
-            total
-          `
-        )
-        .eq(
-          "order_number",
-          reference
-        )
-        .eq(
-          "user_id",
-          user.id
-        )
-        .maybeSingle();
+      error: orderError,
+    } = await admin
+      .from("orders")
+      .select(
+        `
+          id,
+          order_number,
+          user_id,
+          payment_status,
+          order_status,
+          total,
+          paid_finalized_at
+        `
+      )
+      .eq("order_number", reference)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     if (orderError) {
       console.error(
@@ -144,12 +118,8 @@ export async function GET(
 
       return NextResponse.json(
         {
-          error:
-            "Unable to retrieve order.",
-
-          debug:
-            orderError.message,
-
+          error: "Unable to retrieve order.",
+          debug: orderError.message,
           stage,
         },
         {
@@ -161,8 +131,7 @@ export async function GET(
     if (!order) {
       return NextResponse.json(
         {
-          error:
-            "Order not found.",
+          error: "Order not found.",
         },
         {
           status: 404,
@@ -171,32 +140,27 @@ export async function GET(
     }
 
     /* =====================================================
-       ALREADY PAID
+       ALREADY FINALIZED
     ===================================================== */
 
+    /*
+     * paid_finalized_at is the idempotency marker for local
+     * order processing. If it is set, stock has already been
+     * processed exactly once by the database function.
+     */
     if (
-      order.payment_status ===
-      "paid"
+      order.payment_status === "paid" &&
+      order.paid_finalized_at
     ) {
-      stage =
-        "loading_paid_order_items";
+      stage = "loading_paid_order_items";
 
       const {
         data: items,
-        error:
-          itemsError,
-      } =
-        await admin
-          .from(
-            "order_items"
-          )
-          .select(
-            "product_id"
-          )
-          .eq(
-            "order_id",
-            order.id
-          );
+        error: itemsError,
+      } = await admin
+        .from("order_items")
+        .select("product_id")
+        .eq("order_id", order.id);
 
       if (itemsError) {
         console.error(
@@ -207,26 +171,18 @@ export async function GET(
 
       return NextResponse.json({
         paid: true,
-
-        status:
-          "paid",
-
+        status: "paid",
         order,
-
-        productIds:
-          (
-            items ??
-            []
+        productIds: Array.from(
+          new Set(
+            (items ?? [])
+              .map(
+                (item) =>
+                  item.product_id
+              )
+              .filter(Boolean)
           )
-            .map(
-              (
-                item
-              ) =>
-                item.product_id
-            )
-            .filter(
-              Boolean
-            ),
+        ),
       });
     }
 
@@ -234,43 +190,27 @@ export async function GET(
        FIND PAYMONGO PAYMENT RECORD
     ===================================================== */
 
-    stage =
-      "finding_payment_record";
+    stage = "finding_payment_record";
 
     const {
       data: payment,
-      error:
-        paymentError,
-    } =
-      await admin
-        .from(
-          "payments"
-        )
-        .select(
-          `
-            transaction_id,
-            status
-          `
-        )
-        .eq(
-          "order_id",
-          order.id
-        )
-        .eq(
-          "provider",
-          "paymongo"
-        )
-        .order(
-          "created_at",
-          {
-            ascending:
-              false,
-          }
-        )
-        .limit(
-          1
-        )
-        .maybeSingle();
+      error: paymentError,
+    } = await admin
+      .from("payments")
+      .select(
+        `
+          transaction_id,
+          checkout_session_id,
+          status
+        `
+      )
+      .eq("order_id", order.id)
+      .eq("provider", "paymongo")
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
 
     if (paymentError) {
       console.error(
@@ -282,10 +222,7 @@ export async function GET(
         {
           error:
             "Unable to retrieve payment record.",
-
-          debug:
-            paymentError.message,
-
+          debug: paymentError.message,
           stage,
         },
         {
@@ -294,19 +231,16 @@ export async function GET(
       );
     }
 
-    if (
-      !payment
-        ?.transaction_id
-    ) {
+    const checkoutSessionId =
+      payment?.checkout_session_id ||
+      payment?.transaction_id;
+
+    if (!checkoutSessionId) {
       return NextResponse.json({
         paid: false,
-
-        status:
-          "pending",
-
+        status: "pending",
         reason:
           "No PayMongo checkout session was found for this order.",
-
         order,
       });
     }
@@ -319,8 +253,7 @@ export async function GET(
       "checking_paymongo_configuration";
 
     const secretKey =
-      process.env
-        .PAYMONGO_SECRET_KEY;
+      process.env.PAYMONGO_SECRET_KEY;
 
     if (!secretKey) {
       throw new Error(
@@ -335,54 +268,29 @@ export async function GET(
     stage =
       "retrieving_paymongo_checkout_session";
 
-    const response =
-      await fetch(
-        `https://api.paymongo.com/v1/checkout_sessions/${encodeURIComponent(
-          payment.transaction_id
-        )}`,
-        {
-          method:
-            "GET",
+    const response = await fetch(
+      `https://api.paymongo.com/v1/checkout_sessions/${encodeURIComponent(
+        checkoutSessionId
+      )}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Basic ${Buffer.from(
+            `${secretKey}:`
+          ).toString("base64")}`,
+        },
+        cache: "no-store",
+      }
+    );
 
-          headers: {
-            Accept:
-              "application/json",
+    const rawBody = await response.text();
 
-            Authorization:
-              `Basic ${Buffer.from(
-                `${secretKey}:`
-              ).toString(
-                "base64"
-              )}`,
-          },
+    let data: any = null;
 
-          cache:
-            "no-store",
-        }
-      );
-
-    /*
-     * Read as text first.
-     *
-     * This prevents response.json()
-     * from throwing if PayMongo ever
-     * returns an empty/non-JSON body.
-     */
-    const rawBody =
-      await response.text();
-
-    let data:
-      any =
-      null;
-
-    if (
-      rawBody
-    ) {
+    if (rawBody) {
       try {
-        data =
-          JSON.parse(
-            rawBody
-          );
+        data = JSON.parse(rawBody);
       } catch {
         console.error(
           "PayMongo returned non-JSON response:",
@@ -393,32 +301,22 @@ export async function GET(
           {
             error:
               "PayMongo returned an invalid response.",
-
-            debug:
-              `HTTP ${response.status}`,
-
+            debug: `HTTP ${response.status}`,
             stage,
           },
           {
-            status:
-              502,
+            status: 502,
           }
         );
       }
     }
 
-    if (
-      !response.ok
-    ) {
+    if (!response.ok) {
       console.error(
         "PayMongo checkout session retrieval failed:",
         {
-          status:
-            response.status,
-
-          statusText:
-            response.statusText,
-
+          status: response.status,
+          statusText: response.statusText,
           data,
         }
       );
@@ -427,19 +325,14 @@ export async function GET(
         {
           error:
             "Unable to retrieve PayMongo checkout session.",
-
           debug:
-            data?.errors?.[0]
-              ?.detail ??
-            data?.errors?.[0]
-              ?.code ??
+            data?.errors?.[0]?.detail ??
+            data?.errors?.[0]?.code ??
             `PayMongo returned HTTP ${response.status}`,
-
           stage,
         },
         {
-          status:
-            502,
+          status: 502,
         }
       );
     }
@@ -452,85 +345,43 @@ export async function GET(
       "checking_paymongo_payment_status";
 
     const attributes =
-      data?.data
-        ?.attributes;
+      data?.data?.attributes;
 
-    const payments =
-      Array.isArray(
-        attributes
-          ?.payments
-      )
-        ? attributes
-            .payments
-        : [];
+    const payments = Array.isArray(
+      attributes?.payments
+    )
+      ? attributes.payments
+      : [];
 
-    /*
-     * PayMongo payment objects
-     * normally expose:
-     *
-     * payment.attributes.status
-     */
-    const hasPaidPayment =
-      payments.some(
-        (
-          paymongoPayment:
-            any
-        ) =>
-          paymongoPayment
-            ?.attributes
-            ?.status ===
-          "paid"
-      );
+    const hasPaidPayment = payments.some(
+      (paymongoPayment: any) =>
+        paymongoPayment?.attributes?.status ===
+        "paid"
+    );
 
-    /*
-     * Keep payment_intent as an
-     * additional fallback signal.
-     */
     const intentStatus =
-      attributes
-        ?.payment_intent
-        ?.attributes
+      attributes?.payment_intent?.attributes
         ?.status;
 
     const intentSucceeded =
-      intentStatus ===
-      "succeeded";
+      intentStatus === "succeeded";
 
     console.log(
       "PayMongo confirmation status:",
       {
         reference,
-
-        checkoutSessionId:
-          payment
-            .transaction_id,
-
+        checkoutSessionId,
         checkoutSessionStatus:
-          attributes
-            ?.status ??
-          null,
-
-        paymentsCount:
-          payments.length,
-
-        paymentStatuses:
-          payments.map(
-            (
-              paymongoPayment:
-                any
-            ) =>
-              paymongoPayment
-                ?.attributes
-                ?.status ??
-              null
-          ),
-
+          attributes?.status ?? null,
+        paymentsCount: payments.length,
+        paymentStatuses: payments.map(
+          (paymongoPayment: any) =>
+            paymongoPayment?.attributes
+              ?.status ?? null
+        ),
         paymentIntentStatus:
-          intentStatus ??
-          null,
-
+          intentStatus ?? null,
         hasPaidPayment,
-
         intentSucceeded,
       }
     );
@@ -541,36 +392,20 @@ export async function GET(
     ) {
       return NextResponse.json({
         paid: false,
-
-        status:
-          "pending",
-
+        status: "pending",
         reason:
           "PayMongo has not reported this checkout session as paid yet.",
-
         paymongo: {
           checkoutStatus:
-            attributes
-              ?.status ??
-            null,
-
-          paymentStatuses:
-            payments.map(
-              (
-                paymongoPayment:
-                  any
-              ) =>
-                paymongoPayment
-                  ?.attributes
-                  ?.status ??
-                null
-            ),
-
+            attributes?.status ?? null,
+          paymentStatuses: payments.map(
+            (paymongoPayment: any) =>
+              paymongoPayment?.attributes
+                ?.status ?? null
+          ),
           paymentIntentStatus:
-            intentStatus ??
-            null,
+            intentStatus ?? null,
         },
-
         order,
       });
     }
@@ -579,8 +414,7 @@ export async function GET(
        FINALIZE ORDER
     ===================================================== */
 
-    stage =
-      "finalizing_paid_order";
+    stage = "finalizing_paid_order";
 
     console.log(
       "Finalizing paid order:",
@@ -588,54 +422,30 @@ export async function GET(
     );
 
     const result =
-      await finalizePaidOrder(
-        reference
-      );
+      await finalizePaidOrder(reference);
 
     console.log(
       "Paid order finalization result:",
       {
         reference,
-
-        status:
-          result.status,
-
-        productIds:
-          result.productIds,
+        status: result.status,
+        productIds: result.productIds,
       }
     );
 
-    /* =====================================================
-       SUCCESS
-    ===================================================== */
-
-    stage =
-      "complete";
+    stage = "complete";
 
     return NextResponse.json({
-      paid:
-        result.status ===
-        "paid",
-
-      status:
-        result.status,
-
-      order:
-        result.order,
-
-      productIds:
-        result.productIds,
+      paid: result.status === "paid",
+      status: result.status,
+      order: result.order,
+      productIds: result.productIds,
     });
-  } catch (
-    error
-  ) {
+  } catch (error) {
     const message =
-      error instanceof
-      Error
+      error instanceof Error
         ? error.message
-        : String(
-            error
-          );
+        : String(error);
 
     console.error(
       "Payment confirmation error:",
@@ -643,6 +453,18 @@ export async function GET(
         stage,
         message,
         error,
+      }
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unable to confirm payment at this time.",
+        debug: message,
+        stage,
+      },
+      {
+        status: 500,
       }
     );
   }

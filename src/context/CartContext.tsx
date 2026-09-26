@@ -340,7 +340,7 @@ export function CartProvider({
         image_url:
           product.image_url ??
           product.images?.[0] ??
-          "/placeholder.jpg",
+          "/placeholder.svg",
 
         quantity: safeQuantity,
 

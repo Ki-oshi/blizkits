@@ -10,7 +10,7 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
-  const thumbnail = product.images[0] || "/placeholder.jpg";
+  const thumbnail = product.images[0] || "/placeholder.svg";
   const { addToCart } = useCart();
 
   const handleQuickAdd = (e: React.MouseEvent) => {

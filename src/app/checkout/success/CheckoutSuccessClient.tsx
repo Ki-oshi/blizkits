@@ -30,6 +30,91 @@ type Status =
   | "pending"
   | "error";
 
+interface ConfirmationResponse {
+  paid?: boolean;
+
+  status?: string;
+
+  error?: string;
+
+  reason?: string;
+
+  order?: {
+    order_number?: string;
+  };
+
+  productIds?: string[];
+}
+
+interface ConfirmationRequestResult {
+  ok: boolean;
+  status: number;
+  data: ConfirmationResponse;
+}
+
+/*
+ * Prevent multiple mounted effects from making the exact
+ * same confirmation request at the same time.
+ *
+ * This is especially useful during development where React
+ * may intentionally run effects more than once.
+ */
+const confirmationRequests =
+  new Map<
+    string,
+    Promise<ConfirmationRequestResult>
+  >();
+
+async function requestPaymentConfirmation(
+  reference: string
+): Promise<ConfirmationRequestResult> {
+  const existingRequest =
+    confirmationRequests.get(reference);
+
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request =
+    fetch(
+      `/api/paymongo/confirm?reference=${encodeURIComponent(
+        reference
+      )}`,
+      {
+        cache: "no-store",
+      }
+    )
+      .then(async (response) => {
+        let data: ConfirmationResponse =
+          {};
+
+        try {
+          data =
+            await response.json();
+        } catch {
+          data = {};
+        }
+
+        return {
+          ok: response.ok,
+          status: response.status,
+          data,
+        };
+      })
+      .finally(() => {
+        confirmationRequests.delete(
+          reference
+        );
+      });
+
+  confirmationRequests.set(
+    reference,
+    request
+  );
+
+  return request;
+}
+
 export default function CheckoutSuccessClient({
   reference,
 }: Props) {
@@ -37,7 +122,10 @@ export default function CheckoutSuccessClient({
     removeFromCart,
   } = useCart();
 
-  const [status, setStatus] =
+  const [
+    status,
+    setStatus,
+  ] =
     useState<Status>(
       "checking"
     );
@@ -56,36 +144,74 @@ export default function CheckoutSuccessClient({
       null
     );
 
+  /*
+   * Keep the latest removeFromCart function without making
+   * the payment confirmation effect depend on its function
+   * identity.
+   */
+  const removeFromCartRef =
+    useRef(removeFromCart);
+
+  /*
+   * Prevent the same successful checkout from clearing its
+   * products from the cart more than once.
+   */
   const cleared =
     useRef(false);
+
+  useEffect(() => {
+    removeFromCartRef.current =
+      removeFromCart;
+  }, [
+    removeFromCart,
+  ]);
 
   useEffect(() => {
     let cancelled =
       false;
 
-    let attempt = 0;
+    let attempt =
+      0;
+
+    let retryTimer:
+      ReturnType<typeof setTimeout> |
+      null =
+      null;
+
+    /*
+     * Reset UI when navigating to a different checkout
+     * reference without requiring a full page reload.
+     */
+    setStatus(
+      "checking"
+    );
+
+    setError(
+      null
+    );
+
+    setOrderNumber(
+      reference
+    );
+
+    cleared.current =
+      false;
 
     async function confirmPayment() {
       try {
-        const response =
-          await fetch(
-            `/api/paymongo/confirm?reference=${encodeURIComponent(
-              reference
-            )}`,
-            {
-              cache:
-                "no-store",
-            }
+        const {
+          ok,
+          data,
+        } =
+          await requestPaymentConfirmation(
+            reference
           );
-
-        const data =
-          await response.json();
 
         if (cancelled) {
           return;
         }
 
-        if (!response.ok) {
+        if (!ok) {
           throw new Error(
             data.error ||
               "Unable to confirm your payment."
@@ -104,8 +230,11 @@ export default function CheckoutSuccessClient({
 
         if (data.paid) {
           /*
-           * Remove only products
-           * from this successful order.
+           * Remove only the products that belonged to this
+           * successful order.
+           *
+           * Use the ref instead of placing removeFromCart in
+           * the main confirmation effect dependency array.
            */
           if (
             !cleared.current &&
@@ -120,9 +249,10 @@ export default function CheckoutSuccessClient({
               const productId of
               data.productIds
             ) {
-              removeFromCart(
-                productId
-              );
+              removeFromCartRef
+                .current(
+                  productId
+                );
             }
           }
 
@@ -134,16 +264,23 @@ export default function CheckoutSuccessClient({
         }
 
         /*
-         * Webhook/PayMongo may take
-         * a moment to settle.
+         * PayMongo/webhook synchronization may take a moment.
+         *
+         * Retry sequentially instead of starting overlapping
+         * confirmation requests.
          */
-        attempt++;
+        attempt += 1;
 
-        if (attempt < 10) {
-          setTimeout(
-            confirmPayment,
-            2000
-          );
+        if (
+          attempt < 10
+        ) {
+          retryTimer =
+            setTimeout(
+              () => {
+                void confirmPayment();
+              },
+              2000
+            );
 
           return;
         }
@@ -171,11 +308,17 @@ export default function CheckoutSuccessClient({
     void confirmPayment();
 
     return () => {
-      cancelled = true;
+      cancelled =
+        true;
+
+      if (retryTimer) {
+        clearTimeout(
+          retryTimer
+        );
+      }
     };
   }, [
     reference,
-    removeFromCart,
   ]);
 
   /*

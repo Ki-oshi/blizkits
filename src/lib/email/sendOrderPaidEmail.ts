@@ -1,990 +1,304 @@
 import "server-only";
 
-import {
-  createAdminClient,
-} from "@/lib/supabase/admin";
-
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getResendClient,
   getResendFromEmail,
   getSiteUrl,
 } from "@/lib/email/resend";
 
-/* =========================================================
-   TYPES
-========================================================= */
-
-interface EmailOrderItem {
-  productName:
-    string;
-
-  variantName?:
-    string | null;
-
-  quantity:
-    number;
-
-  unitPrice?:
-    number | null;
-
-  subtotal?:
-    number | null;
+interface OrderEmailItem {
+  product_name?: string | null;
+  variant_name?: string | null;
+  quantity?: number | null;
 }
 
 interface SendOrderPaidEmailInput {
-  userId:
-    string;
-
-  orderNumber:
-    string;
-
-  total:
-    number;
-
-  createdAt?:
-    string | null;
-
-  paymentMethod?:
-    string | null;
-
-  items:
-    EmailOrderItem[];
+  orderId: string;
+  orderNumber: string;
+  userId?: string | null;
+  total?: number | null;
+  orderItems?: OrderEmailItem[];
 }
 
 export type SendOrderPaidEmailResult =
   | {
       sent: true;
-      emailId:
-        string | null;
-      recipient:
-        string;
+      email: string;
     }
   | {
       sent: false;
       reason:
-        | "disabled"
-        | "no_email";
+        | "missing_user_id"
+        | "order_updates_disabled"
+        | "preference_lookup_failed"
+        | "auth_user_lookup_failed"
+        | "missing_email"
+        | "resend_not_configured";
     };
 
-/* =========================================================
-   HTML ESCAPE
-========================================================= */
-
-function escapeHtml(
-  value:
-    unknown
-) {
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "&",
-      "&amp;"
-    )
-    .replaceAll(
-      "<",
-      "&lt;"
-    )
-    .replaceAll(
-      ">",
-      "&gt;"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
-    )
-    .replaceAll(
-      "'",
-      "&#039;"
-    );
+function formatCurrency(value?: number | null) {
+  return `₱${Number(value ?? 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
-/* =========================================================
-   CURRENCY
-========================================================= */
-
-function formatCurrency(
-  value:
-    number
-) {
-  return new Intl.NumberFormat(
-    "en-PH",
-    {
-      style:
-        "currency",
-
-      currency:
-        "PHP",
-
-      minimumFractionDigits:
-        2,
-    }
-  ).format(
-    Number(
-      value ?? 0
-    )
-  );
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-/* =========================================================
-   DATE
-========================================================= */
-
-function formatDate(
-  value?:
-    string | null
-) {
-  if (!value) {
-    return "";
-  }
-
-  const date =
-    new Date(
-      value
-    );
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat(
-    "en-PH",
-    {
-      dateStyle:
-        "medium",
-
-      timeStyle:
-        "short",
-
-      timeZone:
-        "Asia/Manila",
-    }
-  ).format(
-    date
-  );
-}
-
-/* =========================================================
-   PAYMENT METHOD LABEL
-========================================================= */
-
-function getPaymentMethodLabel(
-  paymentMethod?:
-    string | null
-) {
-  if (
-    !paymentMethod
-  ) {
-    return "Online Payment";
-  }
-
-  const normalized =
-    paymentMethod
-      .trim()
-      .toLowerCase();
-
-  const labels:
-    Record<
-      string,
-      string
-    > = {
-      gcash:
-        "GCash",
-
-      paymaya:
-        "Maya",
-
-      maya:
-        "Maya",
-
-      card:
-        "Credit / Debit Card",
-
-      grab_pay:
-        "GrabPay",
-
-      grabpay:
-        "GrabPay",
-
-      shopeepay:
-        "ShopeePay",
-
-      qrph:
-        "QR Ph",
+export async function sendOrderPaidEmail({
+  orderId,
+  orderNumber,
+  userId,
+  total,
+  orderItems = [],
+}: SendOrderPaidEmailInput): Promise<SendOrderPaidEmailResult> {
+  if (!userId) {
+    return {
+      sent: false,
+      reason: "missing_user_id",
     };
+  }
 
-  return (
-    labels[
-      normalized
-    ] ??
-    paymentMethod
-  );
-}
+  const admin = createAdminClient();
 
-/* =========================================================
-   PLAIN TEXT EMAIL
-========================================================= */
+  const {
+    data: notificationSettings,
+    error: notificationSettingsError,
+  } = await admin
+    .from("user_notifications")
+    .select("order_updates")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-function createPlainTextEmail(
-  input:
-    SendOrderPaidEmailInput
-) {
-  const itemLines =
-    input.items
-      .map(
-        (
-          item
-        ) => {
-          const variant =
-            item.variantName
-              ? ` - ${item.variantName}`
-              : "";
-
-          const amount =
-            item.subtotal !=
-            null
-              ? ` - ${formatCurrency(
-                  item.subtotal
-                )}`
-              : "";
-
-          return `${item.productName}${variant} x${item.quantity}${amount}`;
-        }
-      )
-      .join(
-        "\n"
-      );
-
-  const orderDate =
-    formatDate(
-      input.createdAt
+  if (notificationSettingsError) {
+    console.error(
+      "Unable to load order notification preference:",
+      notificationSettingsError
     );
 
-  const accountUrl =
-    `${getSiteUrl()}/account?tab=purchases`;
+    return {
+      sent: false,
+      reason: "preference_lookup_failed",
+    };
+  }
 
-  return [
-    "BLIZKITS",
-    "",
-    "Payment confirmed",
-    "",
-    `Order: ${input.orderNumber}`,
-    orderDate
-      ? `Order date: ${orderDate}`
-      : "",
-    `Payment method: ${getPaymentMethodLabel(
-      input.paymentMethod
-    )}`,
-    "",
-    "Items",
-    itemLines ||
-      "Order items unavailable.",
-    "",
-    `Total: ${formatCurrency(
-      input.total
-    )}`,
-    "",
-    "Your payment has been successfully confirmed and your order is now being prepared.",
-    "",
-    `View your order: ${accountUrl}`,
-    "",
-    "Thank you for shopping with BLIZKITS.",
-  ]
-    .filter(
-      (
-        line
-      ) =>
-        line !==
-        ""
-          ? true
-          : true
-    )
-    .join(
-      "\n"
-    );
-}
+  if (notificationSettings?.order_updates === false) {
+    return {
+      sent: false,
+      reason: "order_updates_disabled",
+    };
+  }
 
-/* =========================================================
-   HTML EMAIL
-========================================================= */
+  const {
+    data: authUserData,
+    error: authUserError,
+  } = await admin.auth.admin.getUserById(userId);
 
-function createHtmlEmail(
-  input:
-    SendOrderPaidEmailInput
-) {
-  const accountUrl =
-    `${getSiteUrl()}/account?tab=purchases`;
-
-  const orderDate =
-    formatDate(
-      input.createdAt
+  if (authUserError || !authUserData.user) {
+    console.error(
+      "Unable to load Supabase Auth user for order email:",
+      authUserError
     );
 
-  const paymentMethod =
-    getPaymentMethodLabel(
-      input.paymentMethod
+    return {
+      sent: false,
+      reason: "auth_user_lookup_failed",
+    };
+  }
+
+  const email = authUserData.user.email?.trim();
+
+  if (!email) {
+    return {
+      sent: false,
+      reason: "missing_email",
+    };
+  }
+
+  const resend = getResendClient();
+
+  if (!resend) {
+    console.warn(
+      "RESEND_API_KEY is not configured. Order email was skipped."
     );
+
+    return {
+      sent: false,
+      reason: "resend_not_configured",
+    };
+  }
+
+  const safeOrderNumber = escapeHtml(orderNumber);
+  const accountUrl = `${getSiteUrl()}/account?tab=purchases`;
 
   const itemRows =
-    input.items.length >
-    0
-      ? input.items
-          .map(
-            (
-              item
-            ) => {
-              const productName =
-                escapeHtml(
-                  item.productName
-                );
+    orderItems.length > 0
+      ? orderItems
+          .map((item) => {
+            const productName = escapeHtml(
+              item.product_name || "Product"
+            );
 
-              const variantName =
-                item.variantName
-                  ? escapeHtml(
-                      item.variantName
-                    )
-                  : null;
+            const variant = item.variant_name
+              ? ` <span style="color:#737373;">(${escapeHtml(
+                  item.variant_name
+                )})</span>`
+              : "";
 
-              const quantity =
-                Number(
-                  item.quantity ??
-                    0
-                );
+            const quantity = Number(item.quantity ?? 0);
 
-              const subtotal =
-                item.subtotal !=
-                null
-                  ? formatCurrency(
-                      item.subtotal
-                    )
-                  : item.unitPrice !=
-                      null
-                    ? formatCurrency(
-                        Number(
-                          item.unitPrice
-                        ) *
-                          quantity
-                      )
-                    : "—";
-
-              return `
-                <tr>
-                  <td
-                    style="
-                      padding: 14px 0;
-                      border-bottom: 1px solid #f3f4f6;
-                    "
-                  >
-                    <div
-                      style="
-                        font-size: 14px;
-                        font-weight: 700;
-                        color: #171717;
-                      "
-                    >
-                      ${productName}
-                    </div>
-
-                    ${
-                      variantName
-                        ? `
-                          <div
-                            style="
-                              margin-top: 3px;
-                              font-size: 12px;
-                              color: #737373;
-                            "
-                          >
-                            ${variantName}
-                          </div>
-                        `
-                        : ""
-                    }
-                  </td>
-
-                  <td
-                    align="center"
-                    style="
-                      padding: 14px 12px;
-                      border-bottom: 1px solid #f3f4f6;
-                      font-size: 13px;
-                      color: #525252;
-                    "
-                  >
-                    ${quantity}
-                  </td>
-
-                  <td
-                    align="right"
-                    style="
-                      padding: 14px 0;
-                      border-bottom: 1px solid #f3f4f6;
-                      font-size: 13px;
-                      font-weight: 700;
-                      color: #171717;
-                    "
-                  >
-                    ${subtotal}
-                  </td>
-                </tr>
-              `;
-            }
-          )
-          .join(
-            ""
-          )
+            return `
+              <tr>
+                <td style="padding:10px 0;color:#171717;font-size:14px;">
+                  ${productName}${variant}
+                </td>
+                <td style="padding:10px 0;color:#525252;font-size:14px;text-align:right;">
+                  × ${quantity}
+                </td>
+              </tr>
+            `;
+          })
+          .join("")
       : `
           <tr>
-            <td
-              colspan="3"
-              style="
-                padding: 20px 0;
-                font-size: 13px;
-                color: #737373;
-              "
-            >
-              Order item information is unavailable.
+            <td style="padding:10px 0;color:#737373;font-size:14px;">
+              Your purchased items are available in your BLIZKITS account.
             </td>
           </tr>
         `;
 
-  return `
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
+  const textItems =
+    orderItems.length > 0
+      ? orderItems
+          .map((item) => {
+            const variant = item.variant_name
+              ? ` (${item.variant_name})`
+              : "";
 
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1"
-    />
+            return `- ${item.product_name || "Product"}${variant} × ${
+              item.quantity ?? 0
+            }`;
+          })
+          .join("\n")
+      : "- View your purchased items in your BLIZKITS account.";
 
-    <title>
-      Payment confirmed
-    </title>
-  </head>
-
-  <body
-    style="
-      margin: 0;
-      padding: 0;
-      background: #f7f7f7;
-      font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-      color: #171717;
-    "
-  >
-    <table
-      width="100%"
-      cellspacing="0"
-      cellpadding="0"
-      border="0"
-      style="
-        width: 100%;
-        background: #f7f7f7;
-      "
-    >
-      <tr>
-        <td
-          align="center"
-          style="
-            padding: 40px 16px;
-          "
-        >
-          <table
-            width="100%"
-            cellspacing="0"
-            cellpadding="0"
-            border="0"
-            style="
-              max-width: 600px;
-              background: #ffffff;
-              border-radius: 20px;
-              overflow: hidden;
-              border: 1px solid #eeeeee;
-            "
-          >
-            <!-- Header -->
-            <tr>
-              <td
-                style="
-                  padding: 26px 32px;
-                  border-bottom: 1px solid #f3f4f6;
-                "
-              >
-                <div
-                  style="
-                    font-size: 22px;
-                    font-weight: 900;
-                    letter-spacing: -0.5px;
-                    color: #171717;
-                  "
-                >
-                  BLIZKITS
-                </div>
-              </td>
-            </tr>
-
-            <!-- Main -->
-            <tr>
-              <td
-                style="
-                  padding: 36px 32px;
-                "
-              >
-                <div
-                  style="
-                    display: inline-block;
-                    margin-bottom: 18px;
-                    padding: 7px 12px;
-                    background: #ecfdf5;
-                    border-radius: 999px;
-                    font-size: 11px;
-                    font-weight: 700;
-                    color: #047857;
-                  "
-                >
-                  PAYMENT CONFIRMED
-                </div>
-
-                <h1
-                  style="
-                    margin: 0;
-                    font-size: 28px;
-                    line-height: 1.2;
-                    color: #171717;
-                  "
-                >
-                  Thank you for your order!
-                </h1>
-
-                <p
-                  style="
-                    margin: 14px 0 0;
-                    font-size: 14px;
-                    line-height: 1.7;
-                    color: #737373;
-                  "
-                >
-                  We've successfully received your payment. Your BLIZKITS order is now being prepared.
-                </p>
-
-                <!-- Order Info -->
-                <table
-                  width="100%"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                  style="
-                    margin-top: 28px;
-                    padding: 18px;
-                    background: #fafafa;
-                    border-radius: 14px;
-                  "
-                >
-                  <tr>
-                    <td
-                      style="
-                        padding-bottom: 9px;
-                        font-size: 12px;
-                        color: #737373;
-                      "
-                    >
-                      Order reference
-                    </td>
-
-                    <td
-                      align="right"
-                      style="
-                        padding-bottom: 9px;
-                        font-size: 12px;
-                        font-weight: 700;
-                        color: #171717;
-                      "
-                    >
-                      ${escapeHtml(
-                        input.orderNumber
-                      )}
-                    </td>
-                  </tr>
-
-                  ${
-                    orderDate
-                      ? `
-                        <tr>
-                          <td
-                            style="
-                              padding-bottom: 9px;
-                              font-size: 12px;
-                              color: #737373;
-                            "
-                          >
-                            Order date
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding-bottom: 9px;
-                              font-size: 12px;
-                              font-weight: 700;
-                              color: #171717;
-                            "
-                          >
-                            ${escapeHtml(
-                              orderDate
-                            )}
-                          </td>
-                        </tr>
-                      `
-                      : ""
-                  }
-
-                  <tr>
-                    <td
-                      style="
-                        font-size: 12px;
-                        color: #737373;
-                      "
-                    >
-                      Payment method
-                    </td>
-
-                    <td
-                      align="right"
-                      style="
-                        font-size: 12px;
-                        font-weight: 700;
-                        color: #171717;
-                      "
-                    >
-                      ${escapeHtml(
-                        paymentMethod
-                      )}
-                    </td>
-                  </tr>
-                </table>
-
-                <!-- Items -->
-                <h2
-                  style="
-                    margin: 30px 0 8px;
-                    font-size: 15px;
-                    color: #171717;
-                  "
-                >
-                  Order summary
-                </h2>
-
-                <table
-                  width="100%"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                >
-                  <thead>
+  const { error: emailError } = await resend.emails.send(
+    {
+      from: getResendFromEmail(),
+      to: email,
+      subject: `Payment confirmed — ${orderNumber}`,
+      text: [
+        "BLIZKITS",
+        "",
+        "Payment confirmed",
+        `Order: ${orderNumber}`,
+        `Total: ${formatCurrency(total)}`,
+        "",
+        "Items:",
+        textItems,
+        "",
+        "Your payment has been received and your order is now processing.",
+        `View your order: ${accountUrl}`,
+      ].join("\n"),
+      html: `
+        <!doctype html>
+        <html>
+          <body style="margin:0;padding:0;background:#fafafa;font-family:Arial,Helvetica,sans-serif;color:#171717;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fafafa;padding:32px 16px;">
+              <tr>
+                <td align="center">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border:1px solid #e5e5e5;border-radius:16px;overflow:hidden;">
                     <tr>
-                      <th
-                        align="left"
-                        style="
-                          padding-bottom: 8px;
-                          font-size: 10px;
-                          color: #a3a3a3;
-                          text-transform: uppercase;
-                          letter-spacing: 0.8px;
-                        "
-                      >
-                        Item
-                      </th>
-
-                      <th
-                        align="center"
-                        style="
-                          padding: 0 12px 8px;
-                          font-size: 10px;
-                          color: #a3a3a3;
-                          text-transform: uppercase;
-                          letter-spacing: 0.8px;
-                        "
-                      >
-                        Qty
-                      </th>
-
-                      <th
-                        align="right"
-                        style="
-                          padding-bottom: 8px;
-                          font-size: 10px;
-                          color: #a3a3a3;
-                          text-transform: uppercase;
-                          letter-spacing: 0.8px;
-                        "
-                      >
-                        Amount
-                      </th>
+                      <td style="padding:28px 28px 20px;border-bottom:1px solid #f0f0f0;">
+                        <div style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:#ec4899;text-transform:uppercase;">
+                          BLIZKITS
+                        </div>
+                        <h1 style="margin:10px 0 6px;font-size:24px;line-height:1.25;">
+                          Payment confirmed
+                        </h1>
+                        <p style="margin:0;color:#737373;font-size:14px;line-height:1.6;">
+                          We received your payment and your order is now being processed.
+                        </p>
+                      </td>
                     </tr>
-                  </thead>
 
-                  <tbody>
-                    ${itemRows}
-                  </tbody>
-                </table>
+                    <tr>
+                      <td style="padding:24px 28px;">
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                          <tr>
+                            <td style="padding-bottom:6px;color:#737373;font-size:12px;text-transform:uppercase;font-weight:700;letter-spacing:1px;">
+                              Order reference
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding-bottom:20px;color:#171717;font-family:monospace;font-size:15px;font-weight:700;">
+                              ${safeOrderNumber}
+                            </td>
+                          </tr>
+                        </table>
 
-                <!-- Total -->
-                <table
-                  width="100%"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                  style="
-                    margin-top: 18px;
-                  "
-                >
-                  <tr>
-                    <td
-                      style="
-                        font-size: 14px;
-                        font-weight: 700;
-                        color: #171717;
-                      "
-                    >
-                      Total paid
-                    </td>
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;">
+                          ${itemRows}
+                        </table>
 
-                    <td
-                      align="right"
-                      style="
-                        font-size: 18px;
-                        font-weight: 900;
-                        color: #ec4899;
-                      "
-                    >
-                      ${formatCurrency(
-                        input.total
-                      )}
-                    </td>
-                  </tr>
-                </table>
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:20px;">
+                          <tr>
+                            <td style="color:#737373;font-size:13px;">
+                              Total paid
+                            </td>
+                            <td style="text-align:right;color:#171717;font-size:16px;font-weight:800;">
+                              ${formatCurrency(total)}
+                            </td>
+                          </tr>
+                        </table>
 
-                <!-- Button -->
-                <div
-                  style="
-                    margin-top: 30px;
-                  "
-                >
-                  <a
-                    href="${escapeHtml(
-                      accountUrl
-                    )}"
-                    style="
-                      display: inline-block;
-                      padding: 13px 22px;
-                      background: #ec4899;
-                      border-radius: 12px;
-                      font-size: 13px;
-                      font-weight: 700;
-                      color: #ffffff;
-                      text-decoration: none;
-                    "
-                  >
-                    View My Order
-                  </a>
-                </div>
+                        <div style="margin-top:28px;">
+                          <a
+                            href="${accountUrl}"
+                            style="display:inline-block;background:#ec4899;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 18px;border-radius:10px;"
+                          >
+                            View My Purchases
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
 
-                <p
-                  style="
-                    margin: 30px 0 0;
-                    font-size: 12px;
-                    line-height: 1.7;
-                    color: #a3a3a3;
-                  "
-                >
-                  We'll send another update when there is a change to your order status.
-                </p>
-              </td>
-            </tr>
+                    <tr>
+                      <td style="padding:18px 28px;background:#fafafa;color:#a3a3a3;font-size:11px;line-height:1.6;">
+                        You received this email because Order Status Updates are enabled for your BLIZKITS account.
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </body>
+        </html>
+      `,
+    },
+    {
+      idempotencyKey: `order-paid/${orderId}`,
+    }
+  );
 
-            <!-- Footer -->
-            <tr>
-              <td
-                style="
-                  padding: 22px 32px;
-                  background: #fafafa;
-                  border-top: 1px solid #f3f4f6;
-                  font-size: 11px;
-                  line-height: 1.6;
-                  color: #a3a3a3;
-                "
-              >
-                This email was sent because order status notifications are enabled for your BLIZKITS account.
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>
-  `;
-}
-
-/* =========================================================
-   SEND ORDER PAID EMAIL
-========================================================= */
-
-export async function sendOrderPaidEmail(
-  input:
-    SendOrderPaidEmailInput
-): Promise<SendOrderPaidEmailResult> {
-  const admin =
-    createAdminClient();
-
-  /* =======================================================
-     CHECK USER PREFERENCES
-  ======================================================= */
-
-  const {
-    data:
-      notificationSettings,
-
-    error:
-      notificationError,
-  } =
-    await admin
-      .from(
-        "user_notifications"
-      )
-      .select(
-        "order_updates"
-      )
-      .eq(
-        "user_id",
-        input.userId
-      )
-      .maybeSingle();
-
-  if (
-    notificationError
-  ) {
+  if (emailError) {
     throw new Error(
-      `Unable to read notification preferences: ${notificationError.message}`
-    );
-  }
-
-  /*
-   * No preferences row means the
-   * default setting is enabled,
-   * matching the account UI.
-   */
-  if (
-    notificationSettings
-      ?.order_updates ===
-    false
-  ) {
-    return {
-      sent:
-        false,
-
-      reason:
-        "disabled",
-    };
-  }
-
-  /* =======================================================
-     GET SIGNUP EMAIL FROM SUPABASE AUTH
-  ======================================================= */
-
-  const {
-    data:
-      userResult,
-
-    error:
-      userError,
-  } =
-    await admin.auth.admin.getUserById(
-      input.userId
-    );
-
-  if (
-    userError
-  ) {
-    throw new Error(
-      `Unable to load customer email: ${userError.message}`
-    );
-  }
-
-  const recipientEmail =
-    userResult.user
-      ?.email;
-
-  if (
-    !recipientEmail
-  ) {
-    return {
-      sent:
-        false,
-
-      reason:
-        "no_email",
-    };
-  }
-
-  /* =======================================================
-     SEND EMAIL
-  ======================================================= */
-
-  const resend =
-    getResendClient();
-
-  const {
-    data,
-    error,
-  } =
-    await resend.emails.send({
-      from:
-        getResendFromEmail(),
-
-      to: [
-        recipientEmail,
-      ],
-
-      subject:
-        `Payment confirmed — ${input.orderNumber}`,
-
-      html:
-        createHtmlEmail(
-          input
-        ),
-
-      text:
-        createPlainTextEmail(
-          input
-        ),
-    });
-
-  if (
-    error
-  ) {
-    throw new Error(
-      `Unable to send order email: ${error.message}`
+      `Resend could not send the order email: ${
+        emailError.message || JSON.stringify(emailError)
+      }`
     );
   }
 
   return {
-    sent:
-      true,
-
-    emailId:
-      data?.id ??
-      null,
-
-    recipient:
-      recipientEmail,
+    sent: true,
+    email,
   };
 }

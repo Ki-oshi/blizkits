@@ -14,7 +14,7 @@ interface ProductGalleryProps {
 export default function ProductGallery({ images, productName, isNew }: ProductGalleryProps) {
   const [activeImage, setActiveImage] = useState(0);
   const [isZoomed, setIsZoomed] = useState(false);
-  const displayImages = images.length > 0 ? images : ["/placeholder.jpg"];
+  const displayImages = images.length > 0 ? images : ["/placeholder.svg"];
 
   return (
     <>

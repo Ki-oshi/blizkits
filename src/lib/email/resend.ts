@@ -1,66 +1,33 @@
 import "server-only";
 
-import {
-  Resend,
-} from "resend";
+import { Resend } from "resend";
 
-/* =========================================================
-   RESEND CLIENT
-========================================================= */
-
-let resendClient:
-  Resend | null =
-  null;
+let resendClient: Resend | null = null;
 
 export function getResendClient() {
-  const apiKey =
-    process.env.RESEND_API_KEY;
+  const apiKey = process.env.RESEND_API_KEY?.trim();
 
   if (!apiKey) {
-    throw new Error(
-      "RESEND_API_KEY is not configured."
-    );
+    return null;
   }
 
   if (!resendClient) {
-    resendClient =
-      new Resend(
-        apiKey
-      );
+    resendClient = new Resend(apiKey);
   }
 
   return resendClient;
 }
 
-/* =========================================================
-   FROM ADDRESS
-========================================================= */
-
 export function getResendFromEmail() {
-  const fromEmail =
-    process.env.RESEND_FROM_EMAIL;
-
-  if (!fromEmail) {
-    throw new Error(
-      "RESEND_FROM_EMAIL is not configured."
-    );
-  }
-
-  return fromEmail;
+  return (
+    process.env.RESEND_FROM_EMAIL?.trim() ||
+    "BLIZKITS <onboarding@resend.dev>"
+  );
 }
 
-/* =========================================================
-   SITE URL
-========================================================= */
-
 export function getSiteUrl() {
-  const url =
-    process.env
-      .NEXT_PUBLIC_SITE_URL ||
-    "https://blizkits.vercel.app";
-
-  return url.replace(
-    /\/+$/,
-    ""
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "") ||
+    "http://localhost:3000"
   );
 }

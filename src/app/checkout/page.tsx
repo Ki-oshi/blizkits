@@ -1861,7 +1861,7 @@ export default function CheckoutPage() {
                           <img
                             src={
                               item.image_url ||
-                              "/placeholder.jpg"
+                              "/placeholder.svg"
                             }
                             alt={
                               item.name
