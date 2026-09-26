@@ -645,27 +645,5 @@ export async function GET(
         error,
       }
     );
-
-    /*
-     * TEMPORARY DEBUG OUTPUT
-     *
-     * Remove `debug` and `stage`
-     * after payment confirmation
-     * is working.
-     */
-    return NextResponse.json(
-      {
-        error:
-          "Unable to confirm payment.",
-
-        debug:
-          message,
-
-        stage,
-      },
-      {
-        status: 500,
-      }
-    );
   }
 }
