@@ -1,173 +1,886 @@
-import Link from "next/link";
-import Container from "@/components/ui/Container";
-import Button from "@/components/ui/Button";
-import ProductGrid from "@/components/product/ProductGrid";
-import { createClient } from "@/lib/supabase/server";
-import { Product } from "@/types/product";
-import { Sparkles, ShieldCheck, Truck, Disc } from "lucide-react";
+import {
+  Fragment,
+} from "react";
 
-// Force Next.js to dynamically render this page so inventory changes appear instantly
-export const dynamic = "force-dynamic";
+import { createClient } from "@/lib/supabase/server";
+
+import HomeHero from "@/components/home/HomeHero";
+import TrustStrip from "@/components/home/TrustStrip";
+import CategoryShowcase, {
+  HomeCategory,
+} from "@/components/home/CategoryShowcase";
+import ProductSection from "@/components/home/ProductSection";
+import LimitedDrop from "@/components/home/LimitedDrop";
+import PromoBanner from "@/components/home/PromoBanner";
+
+import { Product } from "@/types/product";
+
+import {
+  HomeCategoriesSettings,
+  HomeFeaturedSettings,
+  HomeHeroSettings,
+  HomeJustLandedSettings,
+  HomeLayoutSettings,
+  HomeLimitedDropSettings,
+  HomePromoSettings,
+  HomeSectionKey,
+} from "@/types/home";
+
+/*
+ * Force server rendering for every request so
+ * homepage configuration and product changes
+ * are reflected immediately.
+ */
+export const dynamic =
+  "force-dynamic";
+
+/* =========================================================
+   DATABASE ROW TYPES
+========================================================= */
+
+interface SettingRow {
+  key: string;
+  value: unknown;
+}
+
+interface ProductRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  price: number | string;
+  category_id: string | null;
+  images: string[] | null;
+  stock: number | null;
+  featured: boolean | null;
+  is_new: boolean | null;
+  created_at: string;
+}
+
+interface CategoryRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+}
+
+/* =========================================================
+   DEFAULT HOMEPAGE SETTINGS
+========================================================= */
+
+const defaultHero: HomeHeroSettings = {
+  enabled: true,
+  eyebrow:
+    "K-Pop Merch & Custom Collectibles",
+  title:
+    "Elevate your bias with BLIZKITS.",
+  description:
+    "Discover exclusive K-pop photocards, handmade custom keychains, and collector merchandise made for fans.",
+  primaryLabel:
+    "Shop All Collections",
+  primaryHref: "/shop",
+  secondaryLabel:
+    "Learn More",
+  secondaryHref: "/about",
+};
+
+const defaultCategories: HomeCategoriesSettings =
+  {
+    enabled: true,
+    title:
+      "Explore Collections",
+    subtitle:
+      "Find photocards, keychains, charms, and collectibles made for your collection.",
+    limit: 3,
+  };
+
+const defaultFeatured: HomeFeaturedSettings =
+  {
+    enabled: true,
+    eyebrow: "Handpicked",
+    title:
+      "Featured Drops",
+    subtitle:
+      "Selected pieces and collector favorites from BLIZKITS.",
+    limit: 4,
+  };
+
+const defaultLimited: HomeLimitedDropSettings =
+  {
+    enabled: false,
+    eyebrow:
+      "Limited Release",
+    title: "Limited Drop",
+    subtitle:
+      "Available only while the clock is running.",
+    startsAt: null,
+    endsAt: null,
+    productIds: [],
+    limit: 4,
+  };
+
+const defaultJustLanded: HomeJustLandedSettings =
+  {
+    enabled: true,
+    eyebrow:
+      "Fresh Arrivals",
+    title: "Just Landed",
+    subtitle:
+      "The newest additions to the BLIZKITS collection.",
+    limit: 8,
+    newBadgeDays: 14,
+  };
+
+const defaultPromo: HomePromoSettings =
+  {
+    enabled: false,
+    eyebrow:
+      "Special Offer",
+    title:
+      "A little something for your next haul.",
+    description:
+      "Watch this space for upcoming BLIZKITS offers and collector deals.",
+    code: null,
+    buttonLabel:
+      "Shop Now",
+    buttonHref:
+      "/shop",
+  };
+
+const defaultLayout: HomeLayoutSettings =
+  {
+    sectionOrder: [
+      "categories",
+      "featured",
+      "limited",
+      "just_landed",
+      "promo",
+    ],
+    showTrustStrip: true,
+  };
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function getSetting<T extends object>(
+  settings: SettingRow[],
+  key: string,
+  fallback: T
+): T {
+  const row =
+    settings.find(
+      (item) =>
+        item.key === key
+    );
+
+  if (
+    !row ||
+    !row.value ||
+    typeof row.value !==
+      "object" ||
+    Array.isArray(row.value)
+  ) {
+    return fallback;
+  }
+
+  return {
+    ...fallback,
+    ...(row.value as Partial<T>),
+  };
+}
+
+function safeLimit(
+  value: unknown,
+  fallback: number,
+  maximum = 12
+) {
+  const parsed =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      parsed
+    )
+  ) {
+    return fallback;
+  }
+
+  return Math.max(
+    1,
+    Math.min(
+      maximum,
+      Math.floor(parsed)
+    )
+  );
+}
+
+function safeDays(
+  value: unknown,
+  fallback: number
+) {
+  const parsed =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      parsed
+    )
+  ) {
+    return fallback;
+  }
+
+  return Math.max(
+    1,
+    Math.min(
+      90,
+      Math.floor(parsed)
+    )
+  );
+}
+
+function isUuid(
+  value: string
+) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
+function mapProducts(
+  rows:
+    | ProductRow[]
+    | null,
+  options?: {
+    newBadgeCutoffMs?: number;
+  }
+): Product[] {
+  return (
+    rows ?? []
+  ).map((row) => {
+    const createdAtMs =
+      Date.parse(
+        row.created_at
+      );
+
+    const automaticNew =
+      options?.newBadgeCutoffMs !==
+        undefined &&
+      Number.isFinite(
+        createdAtMs
+      )
+        ? createdAtMs >=
+          options.newBadgeCutoffMs
+        : Boolean(
+            row.is_new
+          );
+
+    return {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      description:
+        row.description ??
+        "",
+      price: Number(
+        row.price ?? 0
+      ),
+      categoryId:
+        row.category_id ??
+        "",
+      images:
+        Array.isArray(
+          row.images
+        )
+          ? row.images
+          : [],
+      stock: Number(
+        row.stock ?? 0
+      ),
+      featured: Boolean(
+        row.featured
+      ),
+      isNew:
+        automaticNew,
+    };
+  });
+}
+
+function normalizeSectionOrder(
+  value:
+    | HomeSectionKey[]
+    | undefined
+): HomeSectionKey[] {
+  const validSections: HomeSectionKey[] =
+    [
+      "categories",
+      "featured",
+      "limited",
+      "just_landed",
+      "promo",
+    ];
+
+  if (
+    !Array.isArray(value)
+  ) {
+    return validSections;
+  }
+
+  const normalized =
+    value.filter(
+      (
+        section,
+        index,
+        array
+      ) =>
+        validSections.includes(
+          section
+        ) &&
+        array.indexOf(
+          section
+        ) ===
+          index
+    );
+
+  for (const section of validSections) {
+    if (
+      !normalized.includes(
+        section
+      )
+    ) {
+      normalized.push(
+        section
+      );
+    }
+  }
+
+  return normalized;
+}
+
+/* =========================================================
+   PAGE
+========================================================= */
 
 export default async function HomePage() {
-  const supabase = await createClient();
+  const supabase =
+    await createClient();
 
-  // Fetch Featured products and New Arrivals in parallel for maximum performance
-  const [featuredRes, newRes, categoriesRes] = await Promise.all([
-    supabase.from("products").select("*").eq("featured", true).order("created_at", { ascending: false }).limit(4),
-    supabase.from("products").select("*").eq("is_new", true).order("created_at", { ascending: false }).limit(4),
-    supabase.from("categories").select("*").limit(3)
-  ]);
+  /*
+   * Fetch configuration and categories first.
+   */
+  const [
+    settingsResult,
+    categoriesResult,
+  ] =
+    await Promise.all([
+      supabase
+        .from(
+          "site_settings"
+        )
+        .select(
+          "key, value"
+        )
+        .like(
+          "key",
+          "home_%"
+        ),
 
-  const mapProducts = (data: any[] | null): Product[] => (data || []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    slug: p.slug,
-    description: p.description,
-    price: p.price,
-    categoryId: p.category_id,
-    images: p.images,
-    stock: p.stock,
-    featured: p.featured,
-    isNew: p.is_new,
-  }));
+      supabase
+        .from(
+          "categories"
+        )
+        .select(
+          "id, name, slug, description"
+        )
+        .order("name", {
+          ascending: true,
+        }),
+    ]);
 
-  const featuredProducts = mapProducts(featuredRes.data);
-  const newProducts = mapProducts(newRes.data);
-  const categories = categoriesRes.data || [];
+  const settingsRows =
+    (settingsResult.data ??
+      []) as SettingRow[];
+
+  /* =======================================================
+     RESOLVE SETTINGS
+  ======================================================= */
+
+  const heroSettings =
+    getSetting(
+      settingsRows,
+      "home_hero",
+      defaultHero
+    );
+
+  const categoriesSettings =
+    getSetting(
+      settingsRows,
+      "home_categories",
+      defaultCategories
+    );
+
+  const featuredSettings =
+    getSetting(
+      settingsRows,
+      "home_featured",
+      defaultFeatured
+    );
+
+  const limitedSettings =
+    getSetting(
+      settingsRows,
+      "home_limited_drop",
+      defaultLimited
+    );
+
+  const justLandedSettings =
+    getSetting(
+      settingsRows,
+      "home_just_landed",
+      defaultJustLanded
+    );
+
+  const promoSettings =
+    getSetting(
+      settingsRows,
+      "home_promo",
+      defaultPromo
+    );
+
+  const layoutSettings =
+    getSetting(
+      settingsRows,
+      "home_layout",
+      defaultLayout
+    );
+
+  /* =======================================================
+     SANITIZE SETTINGS
+  ======================================================= */
+
+  const categoryLimit =
+    safeLimit(
+      categoriesSettings.limit,
+      3,
+      6
+    );
+
+  const featuredLimit =
+    safeLimit(
+      featuredSettings.limit,
+      4,
+      12
+    );
+
+  const justLandedLimit =
+    safeLimit(
+      justLandedSettings.limit,
+      8,
+      12
+    );
+
+  const limitedLimit =
+    safeLimit(
+      limitedSettings.limit,
+      4,
+      12
+    );
+
+  const newBadgeDays =
+    safeDays(
+      justLandedSettings.newBadgeDays,
+      14
+    );
+
+  const nowMs =
+    Date.now();
+
+  const newBadgeCutoffMs =
+    nowMs -
+    newBadgeDays *
+      24 *
+      60 *
+      60 *
+      1000;
+
+  /* =======================================================
+     LIMITED DROP STATE
+  ======================================================= */
+
+  const limitedStartMs =
+    limitedSettings.startsAt
+      ? Date.parse(
+          limitedSettings.startsAt
+        )
+      : Number.NaN;
+
+  const limitedEndMs =
+    limitedSettings.endsAt
+      ? Date.parse(
+          limitedSettings.endsAt
+        )
+      : Number.NaN;
+
+  const configuredLimitedIds =
+    Array.isArray(
+      limitedSettings.productIds
+    )
+      ? limitedSettings.productIds
+          .filter(
+            (
+              value
+            ): value is string =>
+              typeof value ===
+                "string" &&
+              isUuid(value)
+          )
+          .slice(0, 50)
+      : [];
+
+  /*
+   * Server-side time validation.
+   *
+   * Expired or future campaigns are not
+   * rendered at all.
+   */
+  const isLimitedDropActive =
+    limitedSettings.enabled &&
+    Number.isFinite(
+      limitedStartMs
+    ) &&
+    Number.isFinite(
+      limitedEndMs
+    ) &&
+    limitedEndMs >
+      limitedStartMs &&
+    nowMs >=
+      limitedStartMs &&
+    nowMs <
+      limitedEndMs &&
+    configuredLimitedIds.length >
+      0;
+
+  /* =======================================================
+     FETCH PRODUCT SECTIONS
+  ======================================================= */
+
+  const [
+    featuredResult,
+    justLandedResult,
+  ] =
+    await Promise.all([
+      supabase
+        .from(
+          "products"
+        )
+        .select("*")
+        .eq(
+          "featured",
+          true
+        )
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          }
+        )
+        .limit(
+          featuredLimit
+        ),
+
+      /*
+       * Just Landed is now automatic.
+       *
+       * No is_new filter.
+       * The newest uploaded products
+       * are selected using created_at.
+       */
+      supabase
+        .from(
+          "products"
+        )
+        .select("*")
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          }
+        )
+        .limit(
+          justLandedLimit
+        ),
+    ]);
+
+  /* =======================================================
+     FETCH LIMITED PRODUCTS
+  ======================================================= */
+
+  let limitedRows: ProductRow[] =
+    [];
+
+  if (
+    isLimitedDropActive
+  ) {
+    const {
+      data:
+        limitedProductData,
+    } =
+      await supabase
+        .from(
+          "products"
+        )
+        .select("*")
+        .in(
+          "id",
+          configuredLimitedIds
+        );
+
+    const unsortedRows =
+      (limitedProductData ??
+        []) as ProductRow[];
+
+    /*
+     * Supabase IN queries do not guarantee
+     * the same ordering as productIds,
+     * so restore the admin-configured order.
+     */
+    const productOrder =
+      new Map<
+        string,
+        number
+      >();
+
+    configuredLimitedIds.forEach(
+      (
+        productId,
+        index
+      ) => {
+        productOrder.set(
+          productId,
+          index
+        );
+      }
+    );
+
+    limitedRows =
+      unsortedRows
+        .sort(
+          (a, b) =>
+            (productOrder.get(
+              a.id
+            ) ??
+              Number.MAX_SAFE_INTEGER) -
+            (productOrder.get(
+              b.id
+            ) ??
+              Number.MAX_SAFE_INTEGER)
+        )
+        .slice(
+          0,
+          limitedLimit
+        );
+  }
+
+  /* =======================================================
+     MAP DATA
+  ======================================================= */
+
+  const categories: HomeCategory[] =
+    (
+      (categoriesResult.data ??
+        []) as CategoryRow[]
+    )
+      .slice(
+        0,
+        categoryLimit
+      )
+      .map(
+        (category) => ({
+          id: category.id,
+          name:
+            category.name,
+          slug:
+            category.slug,
+          description:
+            category.description,
+        })
+      );
+
+  const featuredProducts =
+    mapProducts(
+      featuredResult.data as
+        | ProductRow[]
+        | null
+    );
+
+  const justLandedProducts =
+    mapProducts(
+      justLandedResult.data as
+        | ProductRow[]
+        | null,
+      {
+        newBadgeCutoffMs,
+      }
+    );
+
+  const limitedProducts =
+    mapProducts(
+      limitedRows
+    );
+
+  const sectionOrder =
+    normalizeSectionOrder(
+      layoutSettings.sectionOrder
+    );
+
+  /* =======================================================
+     SECTION RENDERING
+  ======================================================= */
+
+  function renderSection(
+    section:
+      HomeSectionKey
+  ) {
+    switch (section) {
+      case "categories":
+        return (
+          <CategoryShowcase
+            categories={
+              categories
+            }
+            settings={{
+              ...categoriesSettings,
+              limit:
+                categoryLimit,
+            }}
+          />
+        );
+
+      case "featured":
+        return (
+          <ProductSection
+            products={
+              featuredProducts
+            }
+            enabled={
+              featuredSettings.enabled
+            }
+            eyebrow={
+              featuredSettings.eyebrow
+            }
+            title={
+              featuredSettings.title
+            }
+            subtitle={
+              featuredSettings.subtitle
+            }
+            background="muted"
+            emptyMessage="Check back soon for new featured drops."
+          />
+        );
+
+      case "limited":
+        if (
+          !isLimitedDropActive ||
+          !limitedSettings.endsAt ||
+          limitedProducts.length ===
+            0
+        ) {
+          return null;
+        }
+
+        return (
+          <LimitedDrop
+            products={
+              limitedProducts
+            }
+            eyebrow={
+              limitedSettings.eyebrow
+            }
+            title={
+              limitedSettings.title
+            }
+            subtitle={
+              limitedSettings.subtitle
+            }
+            endsAt={
+              limitedSettings.endsAt
+            }
+            initialRemainingMs={
+              Math.max(
+                0,
+                limitedEndMs -
+                  nowMs
+              )
+            }
+          />
+        );
+
+      case "just_landed":
+        return (
+          <ProductSection
+            products={
+              justLandedProducts
+            }
+            enabled={
+              justLandedSettings.enabled
+            }
+            eyebrow={
+              justLandedSettings.eyebrow
+            }
+            title={
+              justLandedSettings.title
+            }
+            subtitle={
+              justLandedSettings.subtitle
+            }
+            background="white"
+            emptyMessage="No new items have landed yet."
+          />
+        );
+
+      case "promo":
+        return (
+          <PromoBanner
+            settings={
+              promoSettings
+            }
+          />
+        );
+
+      default:
+        return null;
+    }
+  }
 
   return (
     <main className="bg-white">
-      {/* Hero Section */}
-      <section className="relative bg-neutral-900 py-24 sm:py-36 overflow-hidden">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#ec4899_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        <Container className="relative z-10 text-center">
-          <span className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-full text-xs font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20 mb-6">
-            <Disc className="h-3.5 w-3.5" /> K-Pop Merch & Custom Collectibles
-          </span>
-          <h1 className="text-4xl font-black tracking-tight text-white sm:text-6xl lg:text-7xl">
-            Elevate your bias <br className="hidden sm:block" /> with <span className="text-pink-500">BLIZKITS</span>.
-          </h1>
-          <p className="mx-auto mt-6 max-w-xl text-lg text-neutral-300 leading-relaxed">
-            Discover our exclusive collection of K-pop photocards, handmade custom keychains, and fan merchandise designed for collectors.
-          </p>
-          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/shop" className="w-full sm:w-auto">
-              <Button size="lg" className="w-full sm:w-auto bg-pink-500 hover:bg-pink-600 text-white border-0 shadow-lg shadow-pink-500/25 cursor-pointer">
-                Shop All Collections
-              </Button>
-            </Link>
-            <Link href="/faq" className="w-full sm:w-auto">
-              <Button variant="outline" size="lg" className="w-full sm:w-auto text-white border-neutral-700 hover:bg-neutral-800 cursor-pointer">
-                Learn More
-              </Button>
-            </Link>
-          </div>
-        </Container>
-      </section>
+      {/* Dynamic Hero */}
+      <HomeHero
+        settings={
+          heroSettings
+        }
+      />
 
-      {/* Trust Badges Strip */}
-      <section className="border-b border-neutral-100 bg-neutral-50/50 py-8">
-        <Container>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="flex items-center space-x-4 p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-pink-50 text-pink-500">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-neutral-900">Custom Keychains</h3>
-                <p className="text-xs text-neutral-500">Handmade aesthetic charms tailored to perfection.</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4 p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-pink-50 text-pink-500">
-                <Truck className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-neutral-900">Nationwide Shipping</h3>
-                <p className="text-xs text-neutral-500">Safe packaging for your photocards and merch.</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4 p-4 sm:col-span-2 lg:col-span-1">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-pink-50 text-pink-500">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-neutral-900">Secure Checkout</h3>
-                <p className="text-xs text-neutral-500">Protected data and reliable payment methods.</p>
-              </div>
-            </div>
-          </div>
-        </Container>
-      </section>
-
-      {/* Categories Quick Links */}
-      {categories.length > 0 && (
-        <section className="py-16 sm:py-20">
-          <Container>
-            <div className="text-center mb-12">
-              <h2 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Explore Categories</h2>
-              <p className="mt-2 text-sm text-neutral-500">Find the exact photocards and keychains you are looking for.</p>
-            </div>
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-              {categories.map((cat: any) => (
-                <Link 
-                  key={cat.id} 
-                  href={`/shop?category=${cat.slug}`}
-                  className="group relative flex flex-col justify-end overflow-hidden rounded-2xl bg-neutral-100 p-8 h-64 border border-neutral-200 hover:border-pink-500 transition-all duration-300 shadow-sm hover:shadow-md"
-                >
-                  <div className="relative z-10">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-pink-500">Collection</span>
-                    <h3 className="text-xl font-bold text-neutral-900 mt-1 group-hover:text-pink-600 transition-colors">{cat.name}</h3>
-                    <p className="text-xs text-neutral-500 mt-2 line-clamp-2">{cat.description}</p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </Container>
-        </section>
+      {/* Store Trust Strip */}
+      {layoutSettings.showTrustStrip !==
+        false && (
+        <TrustStrip />
       )}
 
-      {/* Featured Products Section */}
-      <section className="py-16 sm:py-20 bg-neutral-50/50">
-        <Container>
-          <div className="flex items-center justify-between mb-10 border-b border-neutral-200 pb-6">
-            <div>
-              <h2 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Featured Drops</h2>
-              <p className="text-sm text-neutral-500 mt-1">Handpicked photocards and merch loved by collectors.</p>
-            </div>
-            <Link href="/shop" className="text-sm font-semibold text-pink-500 hover:text-pink-600 transition-colors">
-              View all &rarr;
-            </Link>
-          </div>
-          
-          <ProductGrid 
-            products={featuredProducts} 
-            emptyMessage="Check back soon for new featured drops." 
-          />
-        </Container>
-      </section>
-
-      {/* New Arrivals Section */}
-      {newProducts.length > 0 && (
-        <section className="py-16 sm:py-20">
-          <Container>
-            <div className="flex items-center justify-between mb-10 border-b border-neutral-200 pb-6">
-              <div>
-                <h2 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Just Landed</h2>
-                <p className="text-sm text-neutral-500 mt-1">The newest additions to our collection.</p>
-              </div>
-              <Link href="/shop" className="text-sm font-semibold text-pink-500 hover:text-pink-600 transition-colors">
-                View all &rarr;
-              </Link>
-            </div>
-            
-            <ProductGrid 
-              products={newProducts} 
-              emptyMessage="No new items right now." 
-            />
-          </Container>
-        </section>
+      {/* Dynamic Homepage Sections */}
+      {sectionOrder.map(
+        (section) => (
+          <Fragment
+            key={
+              section
+            }
+          >
+            {renderSection(
+              section
+            )}
+          </Fragment>
+        )
       )}
     </main>
   );

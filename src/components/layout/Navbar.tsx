@@ -1,21 +1,20 @@
 "use client";
 
+import type { FormEvent } from "react";
 import {
-  FormEvent,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "nextjs-toploader/app";
-
-import Container from "@/components/ui/Container";
 
 import {
   ArrowRight,
+  ChevronRight,
   Menu,
   Search,
   ShoppingBag,
@@ -23,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 
+import Container from "@/components/ui/Container";
 import { useCart } from "@/context/CartContext";
 import { createClient } from "@/lib/supabase/client";
 
@@ -47,8 +47,15 @@ export default function Navbar() {
   const [isLoggedIn, setIsLoggedIn] =
     useState(false);
 
-  const [isSearchOpen, setIsSearchOpen] =
-    useState(false);
+  const [
+    isMobileMenuOpen,
+    setIsMobileMenuOpen,
+  ] = useState(false);
+
+  const [
+    isSearchOpen,
+    setIsSearchOpen,
+  ] = useState(false);
 
   const [searchQuery, setSearchQuery] =
     useState("");
@@ -63,18 +70,23 @@ export default function Navbar() {
     setSearchCategories,
   ] = useState<SearchCategory[]>([]);
 
-  const [isSearching, setIsSearching] =
-    useState(false);
+  const [
+    isSearching,
+    setIsSearching,
+  ] = useState(false);
 
   const headerRef =
     useRef<HTMLElement | null>(null);
 
   const searchInputRef =
-    useRef<HTMLInputElement | null>(null);
+    useRef<HTMLInputElement | null>(
+      null
+    );
 
-  /*
-   * Cart
-   */
+  /* ======================================================
+     CART
+  ====================================================== */
+
   const { totalItems } = useCart();
 
   const cartBadge =
@@ -82,17 +94,19 @@ export default function Navbar() {
       ? "99+"
       : totalItems.toString();
 
-  /*
-   * Stable Supabase browser client.
-   */
+  /* ======================================================
+     SUPABASE
+  ====================================================== */
+
   const supabase = useMemo(
     () => createClient(),
     []
   );
 
-  /*
-   * Keep authentication state synchronized.
-   */
+  /* ======================================================
+     AUTHENTICATION
+  ====================================================== */
+
   useEffect(() => {
     let mounted = true;
 
@@ -134,10 +148,10 @@ export default function Navbar() {
     };
   }, [supabase]);
 
-  /*
-   * Focus search input whenever
-   * the global search panel opens.
-   */
+  /* ======================================================
+     SEARCH FOCUS
+  ====================================================== */
+
   useEffect(() => {
     if (!isSearchOpen) {
       return;
@@ -153,12 +167,15 @@ export default function Navbar() {
     };
   }, [isSearchOpen]);
 
-  /*
-   * Close search when clicking
-   * outside the header or pressing Escape.
-   */
+  /* ======================================================
+     CLOSE NAV PANELS
+  ====================================================== */
+
   useEffect(() => {
-    if (!isSearchOpen) {
+    if (
+      !isSearchOpen &&
+      !isMobileMenuOpen
+    ) {
       return;
     }
 
@@ -172,6 +189,7 @@ export default function Navbar() {
         )
       ) {
         setIsSearchOpen(false);
+        setIsMobileMenuOpen(false);
       }
     }
 
@@ -180,6 +198,7 @@ export default function Navbar() {
     ) {
       if (event.key === "Escape") {
         setIsSearchOpen(false);
+        setIsMobileMenuOpen(false);
       }
     }
 
@@ -204,15 +223,50 @@ export default function Navbar() {
         handleKeyDown
       );
     };
-  }, [isSearchOpen]);
+  }, [
+    isSearchOpen,
+    isMobileMenuOpen,
+  ]);
 
   /*
-   * Live product/category suggestions.
-   *
-   * Full search is handled by /shop.
-   * These results exist to provide
-   * quick navigation while typing.
+   * Close the mobile menu if the viewport
+   * changes to the desktop breakpoint.
    */
+  useEffect(() => {
+    const mediaQuery =
+      window.matchMedia(
+        "(min-width: 768px)"
+      );
+
+    function handleDesktopChange(
+      event: MediaQueryListEvent
+    ) {
+      if (event.matches) {
+        setIsMobileMenuOpen(false);
+      }
+    }
+
+    if (mediaQuery.matches) {
+      setIsMobileMenuOpen(false);
+    }
+
+    mediaQuery.addEventListener(
+      "change",
+      handleDesktopChange
+    );
+
+    return () => {
+      mediaQuery.removeEventListener(
+        "change",
+        handleDesktopChange
+      );
+    };
+  }, []);
+
+  /* ======================================================
+     LIVE SEARCH
+  ====================================================== */
+
   useEffect(() => {
     const trimmed =
       searchQuery.trim();
@@ -283,48 +337,38 @@ export default function Navbar() {
               (
                 productsResult.data ??
                 []
-              ).map(
-                (product) => ({
-                  id: product.id,
-                  name:
-                    product.name,
-                  slug:
-                    product.slug,
-                  price: Number(
-                    product.price ??
-                      0
-                  ),
-                  images:
-                    Array.isArray(
-                      product.images
-                    )
-                      ? product.images
-                      : [],
-                  stock: Number(
-                    product.stock ??
-                      0
-                  ),
-                })
-              );
+              ).map((product) => ({
+                id: product.id,
+                name: product.name,
+                slug: product.slug,
+
+                price: Number(
+                  product.price ?? 0
+                ),
+
+                images:
+                  Array.isArray(
+                    product.images
+                  )
+                    ? product.images
+                    : [],
+
+                stock: Number(
+                  product.stock ?? 0
+                ),
+              }));
 
             const categories: SearchCategory[] =
               (
                 categoriesResult.data ??
                 []
-              ).map(
-                (category) => ({
-                  id: category.id,
-                  name:
-                    category.name,
-                  slug:
-                    category.slug,
-                })
-              );
+              ).map((category) => ({
+                id: category.id,
+                name: category.name,
+                slug: category.slug,
+              }));
 
-            setSearchProducts(
-              products
-            );
-
+            setSearchProducts(products);
             setSearchCategories(
               categories
             );
@@ -335,19 +379,12 @@ export default function Navbar() {
             );
 
             if (!cancelled) {
-              setSearchProducts(
-                []
-              );
-
-              setSearchCategories(
-                []
-              );
+              setSearchProducts([]);
+              setSearchCategories([]);
             }
           } finally {
             if (!cancelled) {
-              setIsSearching(
-                false
-              );
+              setIsSearching(false);
             }
           }
         },
@@ -357,15 +394,42 @@ export default function Navbar() {
     return () => {
       cancelled = true;
 
-      window.clearTimeout(
-        timeout
-      );
+      window.clearTimeout(timeout);
     };
   }, [
     searchQuery,
     isSearchOpen,
     supabase,
   ]);
+
+  /* ======================================================
+     HANDLERS
+  ====================================================== */
+
+  function closeNavigationPanels() {
+    setIsSearchOpen(false);
+    setIsMobileMenuOpen(false);
+  }
+
+  function handleMobileMenuToggle() {
+    setIsMobileMenuOpen(
+      (current) => !current
+    );
+
+    /*
+     * Search and mobile navigation should
+     * never be open at the same time.
+     */
+    setIsSearchOpen(false);
+  }
+
+  function handleSearchToggle() {
+    setIsSearchOpen(
+      (current) => !current
+    );
+
+    setIsMobileMenuOpen(false);
+  }
 
   function handleSearchSubmit(
     event: FormEvent<HTMLFormElement>
@@ -378,7 +442,7 @@ export default function Navbar() {
     if (!trimmed) {
       router.push("/shop");
 
-      setIsSearchOpen(false);
+      closeNavigationPanels();
 
       return;
     }
@@ -389,11 +453,7 @@ export default function Navbar() {
       )}`
     );
 
-    setIsSearchOpen(false);
-  }
-
-  function handleSearchClose() {
-    setIsSearchOpen(false);
+    closeNavigationPanels();
   }
 
   const hasSuggestions =
@@ -403,6 +463,10 @@ export default function Navbar() {
   const trimmedSearchQuery =
     searchQuery.trim();
 
+  /* ======================================================
+     RENDER
+  ====================================================== */
+
   return (
     <header
       ref={headerRef}
@@ -410,23 +474,44 @@ export default function Navbar() {
     >
       <Container>
         <div className="flex h-16 items-center justify-between">
-          {/* Mobile Menu */}
+          {/* =================================================
+              MOBILE MENU BUTTON
+          ================================================= */}
+
           <div className="flex items-center md:hidden">
             <button
               type="button"
-              className="p-2 text-neutral-900"
-              aria-label="Open Menu"
+              onClick={
+                handleMobileMenuToggle
+              }
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-neutral-900 transition-colors hover:bg-neutral-100 hover:text-pink-500"
+              aria-label={
+                isMobileMenuOpen
+                  ? "Close menu"
+                  : "Open menu"
+              }
+              aria-expanded={
+                isMobileMenuOpen
+              }
+              aria-controls="mobile-navigation"
             >
-              <Menu className="h-6 w-6" />
+              {isMobileMenuOpen ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <Menu className="h-6 w-6" />
+              )}
             </button>
           </div>
 
-          {/* Logo */}
+          {/* =================================================
+              LOGO
+          ================================================= */}
+
           <Link
             href="/"
             className="flex items-center"
             onClick={
-              handleSearchClose
+              closeNavigationPanels
             }
           >
             <Image
@@ -439,12 +524,15 @@ export default function Navbar() {
             />
           </Link>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex md:gap-8">
+          {/* =================================================
+              DESKTOP NAVIGATION
+          ================================================= */}
+
+          <nav className="hidden items-center gap-8 md:flex">
             <Link
               href="/"
               onClick={
-                handleSearchClose
+                closeNavigationPanels
               }
               className="text-sm font-medium text-neutral-900 transition-colors hover:text-pink-500"
             >
@@ -454,7 +542,7 @@ export default function Navbar() {
             <Link
               href="/shop"
               onClick={
-                handleSearchClose
+                closeNavigationPanels
               }
               className="text-sm font-medium text-neutral-900 transition-colors hover:text-pink-500"
             >
@@ -464,7 +552,7 @@ export default function Navbar() {
             <Link
               href="/about"
               onClick={
-                handleSearchClose
+                closeNavigationPanels
               }
               className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
             >
@@ -474,7 +562,7 @@ export default function Navbar() {
             <Link
               href="/faq"
               onClick={
-                handleSearchClose
+                closeNavigationPanels
               }
               className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
             >
@@ -482,18 +570,18 @@ export default function Navbar() {
             </Link>
           </nav>
 
-          {/* Right Actions */}
-          <div className="flex items-center gap-4">
-            {/* Global Search */}
+          {/* =================================================
+              RIGHT ACTIONS
+          ================================================= */}
+
+          <div className="flex items-center gap-2 sm:gap-4">
+            {/* Search */}
             <button
               type="button"
-              onClick={() =>
-                setIsSearchOpen(
-                  (current) =>
-                    !current
-                )
+              onClick={
+                handleSearchToggle
               }
-              className="p-2 text-neutral-900 transition-colors hover:text-pink-500"
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-neutral-900 transition-colors hover:bg-neutral-100 hover:text-pink-500"
               aria-label={
                 isSearchOpen
                   ? "Close search"
@@ -510,7 +598,7 @@ export default function Navbar() {
               )}
             </button>
 
-            {/* Account */}
+            {/* Account - Desktop */}
             <Link
               href={
                 isLoggedIn
@@ -518,9 +606,9 @@ export default function Navbar() {
                   : "/login"
               }
               onClick={
-                handleSearchClose
+                closeNavigationPanels
               }
-              className="hidden p-2 text-neutral-900 transition-colors hover:text-pink-500 md:block"
+              className="hidden h-10 w-10 items-center justify-center rounded-xl text-neutral-900 transition-colors hover:bg-neutral-100 hover:text-pink-500 md:flex"
               title={
                 isLoggedIn
                   ? "Account"
@@ -539,9 +627,9 @@ export default function Navbar() {
             <Link
               href="/cart"
               onClick={
-                handleSearchClose
+                closeNavigationPanels
               }
-              className="relative p-2 text-neutral-900 transition-colors hover:text-pink-500"
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl text-neutral-900 transition-colors hover:bg-neutral-100 hover:text-pink-500"
               aria-label={`Shopping Cart${
                 totalItems > 0
                   ? `, ${totalItems} items`
@@ -567,8 +655,7 @@ export default function Navbar() {
                     leading-none
                     text-white
                     ${
-                      totalItems >
-                      99
+                      totalItems > 99
                         ? "h-4 min-w-[24px]"
                         : "h-4 min-w-4"
                     }
@@ -582,9 +669,116 @@ export default function Navbar() {
         </div>
       </Container>
 
-      {/* ===================================================
+      {/* =====================================================
+          MOBILE NAVIGATION
+      ===================================================== */}
+
+      {isMobileMenuOpen && (
+        <div
+          id="mobile-navigation"
+          className="absolute left-0 top-full w-full border-b border-neutral-200 bg-white shadow-xl shadow-black/5 md:hidden"
+        >
+          <Container>
+            <div className="py-4">
+              <nav className="flex flex-col">
+                {/* Home */}
+                <Link
+                  href="/"
+                  onClick={
+                    closeNavigationPanels
+                  }
+                  className="group flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-semibold text-neutral-900 transition-colors hover:bg-neutral-50 hover:text-pink-500"
+                >
+                  <span>Home</span>
+
+                  <ChevronRight className="h-4 w-4 text-neutral-300 transition-transform group-hover:translate-x-0.5 group-hover:text-pink-500" />
+                </Link>
+
+                {/* Shop */}
+                <Link
+                  href="/shop"
+                  onClick={
+                    closeNavigationPanels
+                  }
+                  className="group flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-semibold text-neutral-900 transition-colors hover:bg-neutral-50 hover:text-pink-500"
+                >
+                  <span>Shop</span>
+
+                  <ChevronRight className="h-4 w-4 text-neutral-300 transition-transform group-hover:translate-x-0.5 group-hover:text-pink-500" />
+                </Link>
+
+                {/* About */}
+                <Link
+                  href="/about"
+                  onClick={
+                    closeNavigationPanels
+                  }
+                  className="group flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-semibold text-neutral-700 transition-colors hover:bg-neutral-50 hover:text-pink-500"
+                >
+                  <span>About</span>
+
+                  <ChevronRight className="h-4 w-4 text-neutral-300 transition-transform group-hover:translate-x-0.5 group-hover:text-pink-500" />
+                </Link>
+
+                {/* FAQ */}
+                <Link
+                  href="/faq"
+                  onClick={
+                    closeNavigationPanels
+                  }
+                  className="group flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-semibold text-neutral-700 transition-colors hover:bg-neutral-50 hover:text-pink-500"
+                >
+                  <span>FAQ</span>
+
+                  <ChevronRight className="h-4 w-4 text-neutral-300 transition-transform group-hover:translate-x-0.5 group-hover:text-pink-500" />
+                </Link>
+              </nav>
+
+              {/* Account */}
+              <div className="mt-3 border-t border-neutral-100 pt-3">
+                <Link
+                  href={
+                    isLoggedIn
+                      ? "/account"
+                      : "/login"
+                  }
+                  onClick={
+                    closeNavigationPanels
+                  }
+                  className="group flex items-center justify-between rounded-xl px-4 py-3.5 transition-colors hover:bg-neutral-50"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-700 transition-colors group-hover:bg-pink-50 group-hover:text-pink-500">
+                      <User className="h-4 w-4" />
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-semibold text-neutral-900">
+                        {isLoggedIn
+                          ? "My Account"
+                          : "Sign In"}
+                      </p>
+
+                      <p className="mt-0.5 text-xs text-neutral-400">
+                        {isLoggedIn
+                          ? "Manage your profile and purchases"
+                          : "Sign in to your BLIZKITS account"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <ChevronRight className="h-4 w-4 text-neutral-300 transition-transform group-hover:translate-x-0.5 group-hover:text-pink-500" />
+                </Link>
+              </div>
+            </div>
+          </Container>
+        </div>
+      )}
+
+      {/* =====================================================
           GLOBAL SEARCH PANEL
-      =================================================== */}
+      ===================================================== */}
+
       {isSearchOpen && (
         <div className="absolute left-0 top-full w-full border-b border-neutral-100 bg-white shadow-xl shadow-black/5">
           <Container>
@@ -607,12 +801,9 @@ export default function Navbar() {
                   value={
                     searchQuery
                   }
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setSearchQuery(
-                      event.target
-                        .value
+                      event.target.value
                     )
                   }
                   placeholder="Search products, categories, keychains, photocards..."
@@ -633,14 +824,11 @@ export default function Navbar() {
                 {!trimmedSearchQuery && (
                   <div className="rounded-xl bg-neutral-50 px-4 py-3">
                     <p className="text-xs leading-5 text-neutral-500">
-                      Search the
-                      BLIZKITS shop
-                      from anywhere on
-                      the website.
-                      Search by product
-                      name, description,
-                      category, price,
-                      or product status.
+                      Search the BLIZKITS shop
+                      from anywhere on the
+                      website. Search by product
+                      name, description, category,
+                      price, or product status.
                     </p>
                   </div>
                 )}
@@ -649,11 +837,9 @@ export default function Navbar() {
                   trimmedSearchQuery.length <
                     2 && (
                     <p className="px-1 py-3 text-xs text-neutral-400">
-                      Keep typing to
-                      see quick
-                      suggestions, or
-                      press Enter to
-                      search.
+                      Keep typing to see quick
+                      suggestions, or press Enter
+                      to search.
                     </p>
                   )}
 
@@ -686,9 +872,7 @@ export default function Navbar() {
 
                           <div className="space-y-1">
                             {searchProducts.map(
-                              (
-                                product
-                              ) => {
+                              (product) => {
                                 const image =
                                   product
                                     .images?.[0] ||
@@ -701,7 +885,7 @@ export default function Navbar() {
                                     }
                                     href={`/product/${product.slug}`}
                                     onClick={
-                                      handleSearchClose
+                                      closeNavigationPanels
                                     }
                                     className="group flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-neutral-50"
                                   >
@@ -781,9 +965,7 @@ export default function Navbar() {
 
                           <div className="flex flex-wrap gap-2">
                             {searchCategories.map(
-                              (
-                                category
-                              ) => (
+                              (category) => (
                                 <Link
                                   key={
                                     category.id
@@ -792,7 +974,7 @@ export default function Navbar() {
                                     category.slug
                                   )}`}
                                   onClick={
-                                    handleSearchClose
+                                    closeNavigationPanels
                                   }
                                   className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-semibold text-neutral-700 transition-colors hover:border-pink-200 hover:bg-pink-50 hover:text-pink-600"
                                 >
@@ -813,13 +995,12 @@ export default function Navbar() {
                             trimmedSearchQuery
                           )}`}
                           onClick={
-                            handleSearchClose
+                            closeNavigationPanels
                           }
                           className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-semibold text-neutral-900 transition-colors hover:bg-neutral-50 hover:text-pink-500"
                         >
                           <span>
-                            View all
-                            results for
+                            View all results for
                             &quot;
                             {
                               trimmedSearchQuery
@@ -839,22 +1020,16 @@ export default function Navbar() {
                   !hasSuggestions && (
                     <div className="rounded-xl bg-neutral-50 px-4 py-4">
                       <p className="text-sm font-medium text-neutral-700">
-                        No quick
-                        suggestions
-                        found.
+                        No quick suggestions found.
                       </p>
 
                       <p className="mt-1 text-xs leading-5 text-neutral-500">
-                        Press Enter or
-                        choose Search to
-                        search the full
-                        shop. The full
-                        search also
+                        Press Enter or choose
+                        Search to search the full
+                        shop. The full search also
                         checks product
-                        descriptions,
-                        categories,
-                        price, and
-                        status.
+                        descriptions, categories,
+                        price, and status.
                       </p>
                     </div>
                   )}
