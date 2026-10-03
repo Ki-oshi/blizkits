@@ -1,29 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
+
 import { Product } from "@/types/product";
-import { useCart } from "@/context/CartContext";
-import { ShoppingBag } from "lucide-react";
 
 interface ProductCardProps {
   product: Product;
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
-  const thumbnail = product.images[0] || "/placeholder.svg";
-  const { addToCart } = useCart();
-
-  const handleQuickAdd = (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent navigating to the product detail page when clicking quick add
-    if (product.stock > 0) {
-      void addToCart(product, 1);
-    }
-  };
+export default function ProductCard({
+  product,
+}: ProductCardProps) {
+  const thumbnail =
+    product.images?.[0] || "/placeholder.svg";
 
   return (
-    <Link href={`/product/${product.slug}`} className="group block">
+    <Link
+      href={`/product/${product.slug}`}
+      className="group block"
+    >
       <div className="relative aspect-square overflow-hidden rounded-2xl bg-neutral-100">
-        
         {/* Dynamic Database Badges */}
         <div className="absolute left-3 top-3 z-10 flex flex-col gap-1.5">
           {product.isNew && (
@@ -31,11 +28,13 @@ export default function ProductCard({ product }: ProductCardProps) {
               NEW
             </span>
           )}
-          {product.stock > 0 && product.stock <= 3 && (
-            <span className="rounded-full bg-amber-500 px-3 py-1 text-[10px] font-bold tracking-wider text-white shadow-sm">
-              LOW STOCK
-            </span>
-          )}
+
+          {product.stock > 0 &&
+            product.stock <= 3 && (
+              <span className="rounded-full bg-amber-500 px-3 py-1 text-[10px] font-bold tracking-wider text-white shadow-sm">
+                LOW STOCK
+              </span>
+            )}
         </div>
 
         <img
@@ -53,24 +52,21 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Quick Add to Cart Button (Appears on Hover) */}
-        {product.stock > 0 && (
-          <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-            <button
-              onClick={handleQuickAdd}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-neutral-900 shadow-md hover:bg-pink-500 hover:text-white transition-colors cursor-pointer"
-              title="Quick Add to Cart"
-            >
-              <ShoppingBag className="h-4 w-4" />
-            </button>
+        {/* View Item Action */}
+        <div className="absolute inset-x-3 bottom-3 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+          <div className="flex items-center justify-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-neutral-900 shadow-lg transition-colors group-hover:bg-pink-500 group-hover:text-white">
+            <span>View Item</span>
+
+            <ArrowUpRight className="h-4 w-4" />
           </div>
-        )}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-col space-y-1">
-        <h3 className="text-base font-medium text-neutral-900 transition-colors group-hover:text-pink-500 line-clamp-1">
+        <h3 className="line-clamp-1 text-base font-medium text-neutral-900 transition-colors group-hover:text-pink-500">
           {product.name}
         </h3>
+
         <p className="text-sm font-semibold text-neutral-500">
           ₱{product.price.toLocaleString()}
         </p>
